@@ -55,23 +55,23 @@ class FlashService : Service() {
         }
         val reporter = RunReporter(requestId, resultFile)
         val usbManager = getSystemService(USB_SERVICE) as UsbManager
-        if (UsbSerialProber.getDefaultProber().findAllDrivers(usbManager).isEmpty()) {
-            reporter.error("No supported USB serial adapter is connected")
-            stopSelf(startId)
-            return START_NOT_STICKY
-        }
         reporter.info("START")
         startInForeground()
 
         worker.execute {
             try {
                 when (action) {
+                    ACTION_DEVICES -> reportUsbDevices(reporter, usbManager)
                     ACTION_RUN -> {
                         val encodedArgs = intent?.getStringExtra(EXTRA_AVRDUDE_ARGS)
                             ?: throw IllegalArgumentException("AVRDUDE arguments are missing")
-                        runAvrdude(reporter, decodeArguments(encodedArgs))
+                        runAvrdude(
+                            reporter,
+                            decodeArguments(encodedArgs),
+                            intent?.getStringExtra(EXTRA_USB_DEVICE)
+                        )
                     }
-                    else -> throw IllegalArgumentException("action must be 'run'")
+                    else -> throw IllegalArgumentException("action must be 'run' or 'devices'")
                 }
             } catch (error: Exception) {
                 reporter.error(error.message ?: error.javaClass.simpleName, error)
@@ -119,13 +119,49 @@ class FlashService : Service() {
         }
     }
 
-    private fun runAvrdude(reporter: RunReporter, avrdudeArgs: List<String>) {
+    private fun reportUsbDevices(reporter: RunReporter, usbManager: UsbManager) {
+        val drivers = UsbSerialProber.getDefaultProber().findAllDrivers(usbManager)
+        if (drivers.isEmpty()) {
+            throw IOException("No supported USB serial adapter is connected")
+        }
+        drivers.forEach { driver ->
+            val device = driver.device
+            reporter.info(
+                "USB_DEVICE path=${device.deviceName} VID=${device.vendorId.toString(16)} " +
+                    "PID=${device.productId.toString(16)} product=${device.productName ?: "unknown"} " +
+                    "manufacturer=${device.manufacturerName ?: "unknown"}"
+            )
+        }
+        reporter.info("RESULT success")
+    }
+
+    private fun runAvrdude(
+        reporter: RunReporter,
+        avrdudeArgs: List<String>,
+        requestedDeviceName: String?
+    ) {
         val requestId = reporter.requestId
         val usbManager = getSystemService(USB_SERVICE) as UsbManager
-        val driver = UsbSerialProber.getDefaultProber()
-            .findAllDrivers(usbManager)
-            .firstOrNull()
-            ?: throw IOException("No supported USB serial adapter is connected")
+        val drivers = UsbSerialProber.getDefaultProber().findAllDrivers(usbManager)
+        if (drivers.isEmpty()) {
+            throw IOException("No supported USB serial adapter is connected")
+        }
+        val driver = if (requestedDeviceName != null) {
+            drivers.firstOrNull { it.device.deviceName == requestedDeviceName }
+                ?: throw IOException(
+                    "USB serial device '$requestedDeviceName' is not connected or is unsupported. " +
+                        "Run 'andruino-flash devices' to list supported devices."
+                )
+        } else {
+            if (drivers.size > 1) {
+                val paths = drivers.joinToString { it.device.deviceName }
+                throw IOException(
+                    "Multiple USB serial adapters are connected ($paths). " +
+                        "Specify one with --usb-device or run 'andruino-flash devices'."
+                )
+            }
+            drivers.single()
+        }
         val device = driver.device
         val baudRateArgument = findOptionValue(avrdudeArgs, "-b")
         val baudRate = baudRateArgument?.toIntOrNull() ?: if (baudRateArgument == null) {
@@ -401,7 +437,9 @@ class FlashService : Service() {
         const val EXTRA_ACTION = "action"
         const val EXTRA_REQUEST_ID = "requestId"
         const val EXTRA_AVRDUDE_ARGS = "avrdudeArgs"
+        const val EXTRA_USB_DEVICE = "usbDevice"
         const val ACTION_RUN = "run"
+        const val ACTION_DEVICES = "devices"
 
         private const val TAG = "AndruinoFlash"
         private const val CHANNEL_ID = "andruino_flash"

@@ -58,6 +58,107 @@ andruino-flash signature
 andruino-flash flash /storage/emulated/0/Download/firmware.hex
 ```
 
+### Build and flash Arduino sketches from Termux
+
+`andruino-flash build` uses the Arduino CLI installed in the Termux Ubuntu
+proot (`proot-distro login ubuntu -- arduino-cli`). By default it builds every
+`.ino` under `/storage/emulated/0/Download/andruino`, choosing the target from
+its parent platform folder:
+
+| Folder | Build target |
+|---|---|
+| `uno` | Arduino Uno (`arduino:avr:uno`) |
+| `nano` | Arduino Nano, ATmega328P old bootloader (`arduino:avr:nano:cpu=atmega328old`) |
+| `attiny1614` | ATtiny1614, megaTinyCore (`megaTinyCore:megaavr:atxy4`) |
+
+Each successful build places `<sketch-name>.ino.hex` beside the `.ino` file.
+Build all sketches, or specify one sketch directory or `.ino` file. For a
+sketch outside a recognized platform folder, pass `--platform` explicitly;
+the sketch contents do not identify a unique board target.
+
+```sh
+andruino-flash build
+andruino-flash build /storage/emulated/0/Download/andruino/uno/Blink1000
+andruino-flash build --platform uno /storage/emulated/0/Projects/Blink/Blink.ino
+```
+
+`flash-sketch` builds the selected sketch and then flashes its generated HEX
+using the selected target/programmer profile. The platform is inferred from
+the sketch's parent folder when possible, or can be specified with
+`--platform`. `flash-platform` flashes an already-built HEX:
+
+```sh
+# List serial adapters. Paths shown here identify USB adapters, not boards.
+andruino-flash devices
+
+# Set these to the current values from `devices` and your chosen sketch tree.
+UNO_USB=/dev/bus/usb/001/008
+NANO_USB=/dev/bus/usb/001/009
+ROOT=/storage/emulated/0/Download/andruino
+
+# Uno itself.
+andruino-flash flash-sketch --platform uno --usb-device "$UNO_USB" \
+  "$ROOT/uno/Blink1000/Blink1000.ino"
+
+# Nano itself.
+andruino-flash flash-sketch --platform nano --usb-device "$NANO_USB" \
+  "$ROOT/nano/Blink1000/Blink1000.ino"
+
+# Uno's ATtiny: flash programmer to Uno, then flash target through Uno.
+andruino-flash flash-sketch --platform uno --usb-device "$UNO_USB" \
+  "$ROOT/uno/jtag2updi/jtag2updi.ino"
+andruino-flash flash-sketch --platform attiny1614 --usb-device "$UNO_USB" \
+  "$ROOT/attiny1614/Blink1000/Blink1000.ino"
+
+# Nano's ATtiny: flash programmer to Nano, then flash target through Nano.
+andruino-flash flash-sketch --platform nano --usb-device "$NANO_USB" \
+  "$ROOT/nano/jtag2updi/jtag2updi.ino"
+andruino-flash flash-sketch --platform attiny1614 --usb-device "$NANO_USB" \
+  "$ROOT/attiny1614/Blink1000/Blink1000.ino"
+
+# Equivalent commands for HEX files already built in those directories.
+andruino-flash flash-platform --usb-device "$UNO_USB" uno \
+  "$ROOT/uno/Blink1000/Blink1000.ino.hex"
+andruino-flash flash-platform --usb-device "$NANO_USB" nano \
+  "$ROOT/nano/Blink1000/Blink1000.ino.hex"
+andruino-flash flash-platform --usb-device "$UNO_USB" uno \
+  "$ROOT/uno/jtag2updi/jtag2updi.ino.hex"
+andruino-flash flash-platform --usb-device "$UNO_USB" attiny1614 \
+  "$ROOT/attiny1614/Blink1000/Blink1000.ino.hex"
+andruino-flash flash-platform --usb-device "$NANO_USB" nano \
+  "$ROOT/nano/jtag2updi/jtag2updi.ino.hex"
+andruino-flash flash-platform --usb-device "$NANO_USB" attiny1614 \
+  "$ROOT/attiny1614/Blink1000/Blink1000.ino.hex"
+```
+
+The Uno profile uses the Arduino bootloader at 115200 baud. The Nano profile
+uses the old bootloader at 57600 baud. The ATtiny1614 profile uses JTAG2UPDI at
+115200 baud. `--platform` selects the compile target and AVRDUDE protocol;
+`--usb-device` selects the physical USB serial adapter the app opens. Thus an
+ATtiny wired to the Nano uses platform `attiny1614` and the Nano's USB path,
+not platform `nano`. The matching JTAG2UPDI sketch must already be on the
+selected board. A USB path is not a permanent board identity; check
+`andruino-flash devices` after reconnecting.
+
+Sketch and HEX paths are command arguments and can be changed independently of
+the target. Set `ROOT` in the examples to use a different sketch tree. For
+build-all, set `ANDRUINO_SKETCH_ROOT` to change the default sketch tree.
+`ANDRUINO_RESULT_DIR` changes where CLI logs are written.
+
+The ATtiny build matches the supplied Arduino IDE profile: chip 1614, 16 MHz
+internal clock, BOD 1.8 V and disabled, EEPROM retained, millis enabled,
+8 ms startup, Wire master/slave, default printf/PWM, all-pin attach interrupts,
+and disabled WDT timeout/window. The non-Optiboot `atxy4` profile reserves the
+full 16 KB flash for the sketch, matching the PC build log. Arduino IDE's
+upload log also writes the ATtiny fuses; compiling a HEX does not embed fuse
+settings in it. The CLI flash command writes only flash. The connected ATtiny's
+fuses were read and already match the IDE upload values, so no fuse changes
+were needed.
+
+The Arduino CLI runs in Termux's Ubuntu proot; it is not bundled into the
+Android APK. AVRDUDE flashing still runs through the Android app and its direct
+USB file-descriptor connection.
+
 For other AVRDUDE targets and options, `run` passes arguments through to the
 bundled AVRDUDE:
 

@@ -4,28 +4,347 @@ set -euo pipefail
 package_name="com.example.andruinoflash"
 action="${1:-}"
 request_id="cli-$(date +%s)-$$-$RANDOM"
-result_dir="/storage/emulated/0/Download/AndruinoFlash"
+result_dir="${ANDRUINO_RESULT_DIR:-/storage/emulated/0/Download/AndruinoFlash}"
 result_file="$result_dir/$request_id.log"
-usage="Usage: andruino-flash signature | andruino-flash flash /path/to/firmware.hex | andruino-flash run -- AVRDUDE_OPTIONS..."
+sketch_root="${ANDRUINO_SKETCH_ROOT:-/storage/emulated/0/Download/andruino}"
+usage="Usage: andruino-flash devices | build [--platform uno|nano|attiny1614] [SKETCH_DIR_OR_INO...] | flash-sketch [--platform uno|nano|attiny1614] [--usb-device PATH] SKETCH_DIR_OR_INO | flash-platform [--usb-device PATH] uno|nano|attiny1614 HEX | signature [--usb-device PATH] | flash [--usb-device PATH] HEX | run [--usb-device PATH] -- AVRDUDE_OPTIONS..."
+usb_device_path=""
+service_action="run"
+avrdude_args=()
+
+sketch_dir_for() {
+    local path="$1"
+    if [[ -f "$path" && "$path" == *.ino ]]; then
+        path="$(dirname -- "$path")"
+    fi
+    if [[ ! -d "$path" ]]; then
+        echo "Sketch directory does not exist: $path" >&2
+        return 2
+    fi
+    (cd -- "$path" && pwd -P)
+}
+
+platform_for_sketch_dir() {
+    case "$(basename -- "$(dirname -- "$1")")" in
+        uno|nano|attiny1614)
+            basename -- "$(dirname -- "$1")"
+            ;;
+        *)
+            echo "Sketch must be inside an uno, nano, or attiny1614 folder: $1" >&2
+            return 2
+            ;;
+    esac
+}
+
+fqbn_for_platform() {
+    case "$1" in
+        uno) echo "arduino:avr:uno" ;;
+        nano) echo "arduino:avr:nano:cpu=atmega328old" ;;
+        attiny1614) echo "megaTinyCore:megaavr:atxy4" ;;
+        *)
+            echo "Unsupported sketch platform: $1" >&2
+            return 2
+            ;;
+    esac
+}
+
+build_sketch_dir() {
+    local sketch_dir="$1"
+    local requested_platform="${2:-}"
+    local sketch_name platform fqbn build_dir built_hex output_hex
+    sketch_name="$(basename -- "$sketch_dir")"
+    if [[ ! -f "$sketch_dir/$sketch_name.ino" ]]; then
+        echo "Expected sketch file is missing: $sketch_dir/$sketch_name.ino" >&2
+        return 2
+    fi
+    if [[ -n "$requested_platform" ]]; then
+        platform="$requested_platform"
+    else
+        platform="$(platform_for_sketch_dir "$sketch_dir")"
+    fi
+    fqbn="$(fqbn_for_platform "$platform")"
+    if ! command -v proot-distro >/dev/null 2>&1; then
+        echo "proot-distro is not installed in Termux" >&2
+        return 1
+    fi
+
+    build_dir="$(mktemp -d "$sketch_dir/.andruino-build.XXXXXX")"
+    (
+        trap 'rm -rf -- "$build_dir"' EXIT
+        local board_options=()
+        if [[ "$platform" == "attiny1614" ]]; then
+            board_options=(
+                --board-options
+                "chip=1614,clock=16internal,bodvoltage=1v8,bodmode=disabled,eesave=enable,millis=enabled,startuptime=8,wiremode=mors,printf=default,PWMmux=default,attach=allenabled,WDTtimeout=disabled,WDTwindow=disabled"
+            )
+        fi
+        proot-distro login ubuntu -- arduino-cli compile \
+            --fqbn "$fqbn" \
+            "${board_options[@]}" \
+            --output-dir "$build_dir" \
+            "$sketch_dir"
+        built_hex="$build_dir/$sketch_name.ino.hex"
+        if [[ ! -s "$built_hex" ]]; then
+            echo "Arduino CLI did not produce the expected HEX file: $built_hex" >&2
+            exit 1
+        fi
+        output_hex="$sketch_dir/$sketch_name.ino.hex"
+        cp -- "$built_hex" "$output_hex"
+        echo "Built $sketch_dir/$sketch_name.ino for $platform ($fqbn)"
+        echo "HEX: $output_hex"
+    )
+}
+
+build_all_sketches() {
+    local sketches=()
+    mapfile -d '' sketches < <(find "$sketch_root" -type f -name '*.ino' -print0 | sort -z)
+    if [[ "${#sketches[@]}" -eq 0 ]]; then
+        echo "No .ino sketches found under $sketch_root" >&2
+        return 1
+    fi
+    local sketch
+    for sketch in "${sketches[@]}"; do
+        build_sketch_dir "$(sketch_dir_for "$sketch")"
+    done
+}
+
+run_avrdude() {
+    mkdir -p "$result_dir"
+    local encoded_args
+    encoded_args="$(printf '%s\0' "${avrdude_args[@]}" | base64 | tr -d '\n')"
+    timeout 600 sh -c '
+        tail -n 0 -F "$1" | awk -v request_id="$2" '"'"'
+            index($0, request_id) {
+                print
+                fflush()
+                if ($0 ~ /RESULT success/) exit 0
+                if ($0 ~ /ERROR/) exit 1
+            }
+        '"'"'
+    ' sh "$result_file" "$request_id" &
+    listener_pid=$!
+    trap 'kill "$listener_pid" 2>/dev/null || true' EXIT
+    sleep 0.2
+
+    local intent_args=(
+        --es action "$service_action"
+        --es requestId "$request_id"
+        --es avrdudeArgs "$encoded_args"
+    )
+    if [[ -n "$usb_device_path" ]]; then
+        intent_args+=(--es usbDevice "$usb_device_path")
+    fi
+    /system/bin/am start-foreground-service --user 0 \
+        -n "$package_name/.FlashService" \
+        "${intent_args[@]}" >/dev/null
+    if wait "$listener_pid"; then
+        trap - EXIT
+        return 0
+    else
+        local result=$?
+        trap - EXIT
+        kill "$listener_pid" 2>/dev/null || true
+        wait "$listener_pid" 2>/dev/null || true
+        if [[ "$result" -eq 124 ]]; then
+            echo "Timed out waiting for the app. Check USB permission and All files access in the app." >&2
+        fi
+        return "$result"
+    fi
+}
+
+flash_platform() {
+    local platform="$1"
+    local firmware="$2"
+    if [[ ! -f "$firmware" ]]; then
+        echo "Firmware file does not exist: $firmware" >&2
+        return 2
+    fi
+    case "$platform" in
+        uno)
+            avrdude_args=(-c arduino -b 115200 -p m328p -U "flash:w:$firmware:i")
+            ;;
+        nano)
+            avrdude_args=(-c arduino -b 57600 -p m328p -U "flash:w:$firmware:i")
+            ;;
+        attiny1614)
+            avrdude_args=(-c jtag2updi -b 115200 -p t1614 -e -U "flash:w:$firmware:i")
+            ;;
+        *)
+            echo "Unsupported platform '$platform'; use uno, nano, or attiny1614" >&2
+            return 2
+            ;;
+    esac
+    run_avrdude
+}
 
 case "$action" in
+    devices)
+        if [[ "$#" -ne 1 ]]; then
+            echo "$usage" >&2
+            exit 2
+        fi
+        service_action="devices"
+        run_avrdude
+        exit $?
+        ;;
+    build)
+        shift
+        requested_platform=""
+        while [[ "$#" -gt 0 ]]; do
+            case "$1" in
+                --platform)
+                    if [[ "$#" -lt 2 || -z "$2" ]]; then
+                        echo "--platform requires uno, nano, or attiny1614" >&2
+                        exit 2
+                    fi
+                    requested_platform="$2"
+                    shift 2
+                    ;;
+                --)
+                    shift
+                    break
+                    ;;
+                -*)
+                    echo "Unknown build option: $1" >&2
+                    echo "$usage" >&2
+                    exit 2
+                    ;;
+                *)
+                    break
+                    ;;
+            esac
+        done
+        if [[ "$#" -eq 0 ]]; then
+            if [[ -n "$requested_platform" ]]; then
+                echo "Specify one or more sketches when overriding the platform" >&2
+                exit 2
+            fi
+            build_all_sketches
+        else
+            for sketch in "$@"; do
+                build_sketch_dir "$(sketch_dir_for "$sketch")" "$requested_platform"
+            done
+        fi
+        exit $?
+        ;;
+    flash-sketch)
+        shift
+        requested_platform=""
+        sketch=""
+        while [[ "$#" -gt 0 ]]; do
+            case "$1" in
+                --platform)
+                    if [[ "$#" -lt 2 || -z "$2" ]]; then
+                        echo "--platform requires uno, nano, or attiny1614" >&2
+                        exit 2
+                    fi
+                    requested_platform="$2"
+                    shift 2
+                    ;;
+                --usb-device)
+                    if [[ "$#" -lt 2 || -z "$2" ]]; then
+                        echo "--usb-device requires an Android USB device path" >&2
+                        exit 2
+                    fi
+                    usb_device_path="$2"
+                    shift 2
+                    ;;
+                --)
+                    shift
+                    if [[ "$#" -eq 1 ]]; then sketch="$1"; shift; break; fi
+                    echo "$usage" >&2
+                    exit 2
+                    ;;
+                -*)
+                    echo "Unknown flash-sketch option: $1" >&2
+                    echo "$usage" >&2
+                    exit 2
+                    ;;
+                *)
+                    if [[ -n "$sketch" ]]; then
+                        echo "$usage" >&2
+                        exit 2
+                    fi
+                    sketch="$1"
+                    shift
+                    ;;
+            esac
+        done
+        if [[ -z "$sketch" ]]; then
+            echo "$usage" >&2
+            exit 2
+        fi
+        sketch_dir="$(sketch_dir_for "$sketch")"
+        if [[ -n "$requested_platform" ]]; then
+            platform="$requested_platform"
+        else
+            platform="$(platform_for_sketch_dir "$sketch_dir")"
+        fi
+        build_sketch_dir "$sketch_dir" "$platform"
+        flash_platform "$platform" "$sketch_dir/$(basename -- "$sketch_dir").ino.hex"
+        exit $?
+        ;;
+    flash-platform)
+        shift
+        if [[ "${1:-}" == "--usb-device" ]]; then
+            if [[ "$#" -lt 2 || -z "$2" ]]; then
+                echo "--usb-device requires an Android USB device path" >&2
+                exit 2
+            fi
+            usb_device_path="$2"
+            shift 2
+        fi
+        if [[ "$#" -ne 2 ]]; then
+            echo "$usage" >&2
+            exit 2
+        fi
+        flash_platform "$1" "$2"
+        exit $?
+        ;;
     signature)
-        if [ "$#" -ne 1 ]; then
+        shift
+        if [[ "${1:-}" == "--usb-device" ]]; then
+            if [[ "$#" -lt 2 || -z "$2" ]]; then
+                echo "--usb-device requires an Android USB device path" >&2
+                exit 2
+            fi
+            usb_device_path="$2"
+            shift 2
+        fi
+        if [ "$#" -ne 0 ]; then
             echo "$usage" >&2
             exit 2
         fi
         avrdude_args=(-c jtag2updi -b 115200 -p t1614 -U signature:r:-:h)
         ;;
     flash)
-        if [ "$#" -ne 2 ]; then
+        shift
+        if [[ "${1:-}" == "--usb-device" ]]; then
+            if [[ "$#" -lt 2 || -z "$2" ]]; then
+                echo "--usb-device requires an Android USB device path" >&2
+                exit 2
+            fi
+            usb_device_path="$2"
+            shift 2
+        fi
+        if [ "$#" -ne 1 ]; then
             echo "$usage" >&2
             exit 2
         fi
-        firmware="$2"
-        avrdude_args=(-c jtag2updi -b 115200 -p t1614 -e -U "flash:w:$firmware:i")
+        firmware="$1"
+        flash_platform attiny1614 "$firmware"
+        exit $?
         ;;
     run)
         shift
+        if [[ "${1:-}" == "--usb-device" ]]; then
+            if [[ "$#" -lt 2 || -z "$2" ]]; then
+                echo "--usb-device requires an Android USB device path" >&2
+                exit 2
+            fi
+            usb_device_path="$2"
+            shift 2
+        fi
         if [ "${1:-}" = "--" ]; then
             shift
         fi
@@ -41,33 +360,4 @@ case "$action" in
         ;;
 esac
 
-mkdir -p "$result_dir"
-encoded_args="$(printf '%s\0' "${avrdude_args[@]}" | base64 | tr -d '\n')"
-timeout 600 sh -c '
-    tail -n 0 -F "$1" | awk -v request_id="$2" '"'"'
-        index($0, request_id) {
-            print
-            fflush()
-            if ($0 ~ /RESULT success/) exit 0
-            if ($0 ~ /ERROR/) exit 1
-        }
-    '"'"'
-' sh "$result_file" "$request_id" &
-listener_pid=$!
-trap 'kill "$listener_pid" 2>/dev/null || true' EXIT
-sleep 0.2
-
-/system/bin/am start-foreground-service --user 0 \
-    -n "$package_name/.FlashService" \
-    --es action run \
-    --es requestId "$request_id" \
-    --es avrdudeArgs "$encoded_args" >/dev/null
-if wait "$listener_pid"; then
-    exit 0
-else
-    result=$?
-    if [ "$result" -eq 124 ]; then
-        echo "Timed out waiting for the app. Check USB permission and All files access in the app." >&2
-    fi
-    exit "$result"
-fi
+run_avrdude
