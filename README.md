@@ -14,6 +14,10 @@ and CDC-ACM adapters. AVRDUDE programmers that require their own USB protocol
 file-descriptor backend. A programmer/target combination must also be
 electrically and protocol-compatible with the board.
 
+For the complete from-scratch guide—including Android installation, Termux
+and Arduino CLI setup, USB selection, and Uno/Nano/ATtiny1614 flashing steps—
+see [docs/REPRODUCING.md](docs/REPRODUCING.md).
+
 ## Build
 
 Requirements: Android Studio/SDK, JDK 17, Android NDK `28.2.13676358`, CMake
