@@ -159,6 +159,72 @@ static int android_usb_control_out(int request, int value, int index) {
   return ioctl(android_usb_fd, USBDEVFS_CONTROL, &transfer);
 }
 
+static int android_usb_set_baud(long baud) {
+  unsigned long factor;
+  unsigned long divisor;
+
+  if(baud <= 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  if(baud == 921600) {
+    divisor = 7;
+    factor = 0xf300;
+  } else if(baud == 307200) {
+    divisor = 7;
+    factor = 0xd900;
+  } else {
+    factor = 1532620800UL/(unsigned long) baud;
+    divisor = 3;
+    while(factor > 0xfff0 && divisor > 0) {
+      factor >>= 3;
+      divisor--;
+    }
+    if(factor > 0xfff0) {
+      errno = EINVAL;
+      return -1;
+    }
+    factor = 0x10000 - factor;
+  }
+
+  divisor |= 0x0080;
+  int value = (int) ((factor & 0xff00) | divisor);
+  int index = (int) (factor & 0xff);
+
+  if(android_usb_control_out(0x9a, 0x1312, value) < 0 ||
+     android_usb_control_out(0x9a, 0x0f2c, index) < 0)
+    return -1;
+
+  return 0;
+}
+
+static int android_usb_setparams(long baud, unsigned long cflags) {
+  int line_control = 0xc0;
+
+  if(android_usb_set_baud(baud) < 0)
+    return -1;
+
+  if(cflags & SERIAL_CS8)
+    line_control |= 0x03;
+  else if(cflags & SERIAL_CS7)
+    line_control |= 0x02;
+  else if(cflags & SERIAL_CS6)
+    line_control |= 0x01;
+
+  if(cflags & SERIAL_CSTOPB)
+    line_control |= 0x04;
+  if(cflags & (SERIAL_PARENB | SERIAL_PARODD)) {
+    line_control |= 0x08;
+    if(!(cflags & SERIAL_PARODD))
+      line_control |= 0x10;
+  }
+
+  if(android_usb_control_out(0x9a, 0x2518, line_control) < 0)
+    return -1;
+
+  return 0;
+}
+
 static int android_usb_set_dtr_rts(int is_on) {
   if(!android_usb_ch340)
     return 0;                   // Non-CH340 adapters are reset by Android before exec
@@ -231,8 +297,11 @@ static speed_t serial_baud_lookup(long baud, bool *nonstandard) {
 static int ser_setparams(const union filedescriptor *fd, long baud, unsigned long cflags) {
   int rc;
 #ifdef __ANDROID__
-  if(android_usb_is_active(fd))
-    return 0;                   // Android configured the USB serial driver before exec
+  if(android_usb_is_active(fd)) {
+    if(android_usb_ch340)
+      return android_usb_setparams(baud, cflags);
+    return 0;                   // Android configured non-CH340 adapters before exec
+  }
 #endif
   struct termios termios;
   bool nonstandard;
@@ -485,8 +554,16 @@ static int ser_open(const char *port, union pinfo pinfo, union filedescriptor *f
     android_usb_fd = fd;
     fdp->ifd = fd;
     android_usb_ch340 = ch340 && strcmp(ch340, "1") == 0;
+    pmsg_notice("Android USB serial adapter mode: %s\n",
+                android_usb_ch340 ? "CH340" : "generic");
     android_usb_rx_offset = 0;
     android_usb_rx_length = 0;
+    if(android_usb_ch340 &&
+       android_usb_setparams(pinfo.serialinfo.baud, pinfo.serialinfo.cflags) < 0) {
+      pmsg_ext_error("cannot configure CH340 serial port: %s\n", strerror(errno));
+      android_usb_fd = -1;
+      return -1;
+    }
     return 0;
   }
 #endif

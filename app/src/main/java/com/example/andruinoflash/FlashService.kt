@@ -150,9 +150,9 @@ class FlashService : Service() {
             port.open(connection)
             port.setParameters(baudRate, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
             port.setDTR(false)
-            Thread.sleep(50)
+            Thread.sleep(250)
             port.setDTR(true)
-            Thread.sleep(50)
+            Thread.sleep(100)
             port.setDTR(false)
             Thread.sleep(if (findOptionValue(avrdudeArgs, "-c") == "jtag2updi") 1200 else 100)
         } catch (error: Exception) {
