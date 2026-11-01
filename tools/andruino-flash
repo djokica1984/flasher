@@ -1,0 +1,73 @@
+#!/data/data/com.termux/files/usr/bin/bash
+set -euo pipefail
+
+package_name="com.example.andruinoflash"
+action="${1:-}"
+request_id="cli-$(date +%s)-$$-$RANDOM"
+result_dir="/storage/emulated/0/Download/AndruinoFlash"
+result_file="$result_dir/$request_id.log"
+usage="Usage: andruino-flash signature | andruino-flash flash /path/to/firmware.hex | andruino-flash run -- AVRDUDE_OPTIONS..."
+
+case "$action" in
+    signature)
+        if [ "$#" -ne 1 ]; then
+            echo "$usage" >&2
+            exit 2
+        fi
+        avrdude_args=(-c jtag2updi -b 115200 -p t1614 -U signature:r:-:h)
+        ;;
+    flash)
+        if [ "$#" -ne 2 ]; then
+            echo "$usage" >&2
+            exit 2
+        fi
+        firmware="$2"
+        avrdude_args=(-c jtag2updi -b 115200 -p t1614 -e -U "flash:w:$firmware:i")
+        ;;
+    run)
+        shift
+        if [ "${1:-}" = "--" ]; then
+            shift
+        fi
+        if [ "$#" -eq 0 ]; then
+            echo "$usage" >&2
+            exit 2
+        fi
+        avrdude_args=("$@")
+        ;;
+    *)
+        echo "$usage" >&2
+        exit 2
+        ;;
+esac
+
+mkdir -p "$result_dir"
+encoded_args="$(printf '%s\0' "${avrdude_args[@]}" | base64 | tr -d '\n')"
+timeout 600 sh -c '
+    tail -n 0 -F "$1" | awk -v request_id="$2" '"'"'
+        index($0, request_id) {
+            print
+            fflush()
+            if ($0 ~ /RESULT success/) exit 0
+            if ($0 ~ /ERROR/) exit 1
+        }
+    '"'"'
+' sh "$result_file" "$request_id" &
+listener_pid=$!
+trap 'kill "$listener_pid" 2>/dev/null || true' EXIT
+sleep 0.2
+
+/system/bin/am start-foreground-service --user 0 \
+    -n "$package_name/.FlashService" \
+    --es action run \
+    --es requestId "$request_id" \
+    --es avrdudeArgs "$encoded_args" >/dev/null
+if wait "$listener_pid"; then
+    exit 0
+else
+    result=$?
+    if [ "$result" -eq 124 ]; then
+        echo "Timed out waiting for the app. Check USB permission and All files access in the app." >&2
+    fi
+    exit "$result"
+fi

@@ -1,4 +1,4 @@
-package com.example.attinyflash;
+package com.example.andruinoflash;
 
 public final class UsbAvrdudeNative {
     static {
@@ -12,5 +12,6 @@ public final class UsbAvrdudeNative {
             int usbFileDescriptor,
             int inputEndpoint,
             int outputEndpoint,
+            boolean ch340Device,
             String[] arguments);
 }

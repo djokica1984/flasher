@@ -1,4 +1,4 @@
-package com.example.attinyflash
+package com.example.andruinoflash
 
 import android.app.Activity
 import android.app.PendingIntent
@@ -6,7 +6,6 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.net.Uri
 import android.os.Build
@@ -17,7 +16,7 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
-import java.util.UUID
+import com.hoho.android.usbserial.driver.UsbSerialProber
 
 class MainActivity : Activity() {
     private var usbPermissionReceiver: BroadcastReceiver? = null
@@ -31,12 +30,12 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
         }
         content.addView(TextView(this).apply {
-            text = "Connect the Arduino Uno/JTAG2UPDI to USB OTG, then authorize it and test the ATtiny1614 connection."
+            text = "Connect a supported USB-serial AVR programmer or Arduino board to USB OTG, authorize it, then use the Andruino Flash Termux CLI."
             textSize = 18f
         })
         content.addView(Button(this).apply {
-            text = "Authorize USB and read signature"
-            setOnClickListener { authorizeUsbAndReadSignature() }
+            text = "Authorize USB device"
+            setOnClickListener { authorizeUsbDevice() }
         })
         content.addView(Button(this).apply {
             text = "Grant all-files access"
@@ -51,7 +50,7 @@ class MainActivity : Activity() {
             }
         })
         content.addView(TextView(this).apply {
-            text = "Grant all-files access once to let the Termux command read firmware paths. Then authorize the USB adapter. See the project README for CLI usage."
+            text = "Grant all-files access once to let the Termux command read firmware paths. Then authorize the USB serial adapter. See the project README for CLI usage."
             textSize = 14f
         })
         setContentView(content)
@@ -65,17 +64,18 @@ class MainActivity : Activity() {
         super.onDestroy()
     }
 
-    private fun authorizeUsbAndReadSignature() {
+    private fun authorizeUsbDevice() {
         val usbManager = getSystemService(Context.USB_SERVICE) as UsbManager
-        val device = usbManager.deviceList.values.firstOrNull {
-            it.vendorId == CH340_VENDOR_ID && it.productId == CH340_PRODUCT_ID
-        }
+        val device = UsbSerialProber.getDefaultProber()
+            .findAllDrivers(usbManager)
+            .firstOrNull()
+            ?.device
         if (device == null) {
-            Toast.makeText(this, "Connect the CH340 adapter (1a86:7523) first", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "No supported USB-serial adapter detected", Toast.LENGTH_LONG).show()
             return
         }
         if (usbManager.hasPermission(device)) {
-            startSignatureRead()
+            Toast.makeText(this, "USB access is already authorized", Toast.LENGTH_SHORT).show()
             return
         }
 
@@ -87,7 +87,7 @@ class MainActivity : Activity() {
                     usbPermissionReceiver = null
                 }
                 if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) {
-                    startSignatureRead()
+                    Toast.makeText(this@MainActivity, "USB access authorized", Toast.LENGTH_SHORT).show()
                 } else {
                     Toast.makeText(this@MainActivity, "USB permission was denied", Toast.LENGTH_LONG).show()
                 }
@@ -109,19 +109,4 @@ class MainActivity : Activity() {
         usbManager.requestPermission(device, callback)
     }
 
-    private fun startSignatureRead() {
-        val request = Intent(this, FlashService::class.java)
-            .putExtra(FlashService.EXTRA_ACTION, FlashService.ACTION_SIGNATURE)
-            .putExtra(FlashService.EXTRA_REQUEST_ID, UUID.randomUUID().toString())
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(request)
-        } else {
-            startService(request)
-        }
-    }
-
-    companion object {
-        private const val CH340_VENDOR_ID = 0x1A86
-        private const val CH340_PRODUCT_ID = 0x7523
-    }
 }

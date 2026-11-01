@@ -25,12 +25,17 @@ static void throw_io_exception(JNIEnv *env, const char *message) {
 }
 
 static int has_usb_environment_key(const char *entry) {
-    return strncmp(entry, "ATTINY_USB_FD=", 14) == 0 ||
-           strncmp(entry, "ATTINY_USB_IN_EP=", 17) == 0 ||
-           strncmp(entry, "ATTINY_USB_OUT_EP=", 18) == 0;
+    return strncmp(entry, "ANDRUINO_USB_FD=", 16) == 0 ||
+           strncmp(entry, "ANDRUINO_USB_IN_EP=", 19) == 0 ||
+           strncmp(entry, "ANDRUINO_USB_OUT_EP=", 20) == 0 ||
+           strncmp(entry, "ANDRUINO_USB_CH340=", 19) == 0;
 }
 
-static char **make_child_environment(int usb_fd, int input_endpoint, int output_endpoint) {
+static char **make_child_environment(
+        int usb_fd,
+        int input_endpoint,
+        int output_endpoint,
+        int ch340_device) {
     size_t count = 0;
     for (char **entry = environ; entry != NULL && *entry != NULL; entry++) {
         if (!has_usb_environment_key(*entry)) {
@@ -38,7 +43,7 @@ static char **make_child_environment(int usb_fd, int input_endpoint, int output_
         }
     }
 
-    char **child_environment = calloc(count + 4, sizeof(char *));
+    char **child_environment = calloc(count + 5, sizeof(char *));
     if (child_environment == NULL) {
         return NULL;
     }
@@ -50,9 +55,10 @@ static char **make_child_environment(int usb_fd, int input_endpoint, int output_
         }
     }
 
-    if (asprintf(&child_environment[index++], "ATTINY_USB_FD=%d", usb_fd) < 0 ||
-        asprintf(&child_environment[index++], "ATTINY_USB_IN_EP=%d", input_endpoint) < 0 ||
-        asprintf(&child_environment[index++], "ATTINY_USB_OUT_EP=%d", output_endpoint) < 0) {
+    if (asprintf(&child_environment[index++], "ANDRUINO_USB_FD=%d", usb_fd) < 0 ||
+        asprintf(&child_environment[index++], "ANDRUINO_USB_IN_EP=%d", input_endpoint) < 0 ||
+        asprintf(&child_environment[index++], "ANDRUINO_USB_OUT_EP=%d", output_endpoint) < 0 ||
+        asprintf(&child_environment[index++], "ANDRUINO_USB_CH340=%d", ch340_device) < 0) {
         for (size_t i = count; i < index; i++) {
             free(child_environment[i]);
         }
@@ -67,9 +73,10 @@ static void free_child_environment(char **child_environment) {
         return;
     }
     for (size_t i = 0; child_environment[i] != NULL; i++) {
-        if (strncmp(child_environment[i], "ATTINY_USB_FD=", 14) == 0 ||
-            strncmp(child_environment[i], "ATTINY_USB_IN_EP=", 17) == 0 ||
-            strncmp(child_environment[i], "ATTINY_USB_OUT_EP=", 18) == 0) {
+        if (strncmp(child_environment[i], "ANDRUINO_USB_FD=", 16) == 0 ||
+            strncmp(child_environment[i], "ANDRUINO_USB_IN_EP=", 19) == 0 ||
+            strncmp(child_environment[i], "ANDRUINO_USB_OUT_EP=", 20) == 0 ||
+            strncmp(child_environment[i], "ANDRUINO_USB_CH340=", 19) == 0) {
             free(child_environment[i]);
         }
     }
@@ -134,12 +141,13 @@ static void child_close_descriptors(int usb_fd, int pipe_write_fd) {
 }
 
 JNIEXPORT jobjectArray JNICALL
-Java_com_example_attinyflash_UsbAvrdudeNative_runAvrdude(
+Java_com_example_andruinoflash_UsbAvrdudeNative_runAvrdude(
         JNIEnv *env,
         jclass clazz,
         jint usb_fd,
         jint input_endpoint,
         jint output_endpoint,
+        jboolean ch340_device,
         jobjectArray java_arguments) {
     (void) clazz;
 
@@ -171,7 +179,8 @@ Java_com_example_attinyflash_UsbAvrdudeNative_runAvrdude(
         return NULL;
     }
 
-    char **child_environment = make_child_environment(usb_fd, input_endpoint, output_endpoint);
+    char **child_environment = make_child_environment(
+            usb_fd, input_endpoint, output_endpoint, ch340_device == JNI_TRUE);
     if (child_environment == NULL) {
         fcntl(usb_fd, F_SETFD, descriptor_flags);
         free_arguments(arguments, argument_count);

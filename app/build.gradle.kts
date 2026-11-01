@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.attinyflash"
+    namespace = "com.example.andruinoflash"
     compileSdk = 35
     ndkVersion = "28.2.13676358"
 
@@ -18,7 +18,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.attinyflash"
+        applicationId = "com.example.andruinoflash"
         minSdk = 26
         targetSdk = 35
         versionCode = 1

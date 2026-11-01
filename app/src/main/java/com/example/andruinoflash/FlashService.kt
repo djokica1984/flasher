@@ -1,4 +1,4 @@
-package com.example.attinyflash
+package com.example.andruinoflash
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -16,6 +16,7 @@ import android.hardware.usb.UsbManager
 import android.os.Build
 import android.os.Environment
 import android.os.IBinder
+import android.util.Base64
 import android.util.Log
 import com.hoho.android.usbserial.driver.UsbSerialPort
 import com.hoho.android.usbserial.driver.UsbSerialProber
@@ -54,16 +55,8 @@ class FlashService : Service() {
         }
         val reporter = RunReporter(requestId, resultFile)
         val usbManager = getSystemService(USB_SERVICE) as UsbManager
-        val device = usbManager.deviceList.values.firstOrNull {
-            it.vendorId == CH340_VENDOR_ID && it.productId == CH340_PRODUCT_ID
-        }
-        if (device == null) {
-            reporter.error("CH340 adapter 1a86:7523 is not connected")
-            stopSelf(startId)
-            return START_NOT_STICKY
-        }
-        if (!usbManager.hasPermission(device)) {
-            reporter.error("USB permission is missing; open the app and authorize the adapter first")
+        if (UsbSerialProber.getDefaultProber().findAllDrivers(usbManager).isEmpty()) {
+            reporter.error("No supported USB serial adapter is connected")
             stopSelf(startId)
             return START_NOT_STICKY
         }
@@ -73,13 +66,12 @@ class FlashService : Service() {
         worker.execute {
             try {
                 when (action) {
-                    ACTION_SIGNATURE -> runAvrdude(reporter, null)
-                    ACTION_FLASH -> {
-                        val file = intent?.getStringExtra(EXTRA_FIRMWARE)
-                            ?: throw IllegalArgumentException("flash requires a firmware path")
-                        runAvrdude(reporter, file)
+                    ACTION_RUN -> {
+                        val encodedArgs = intent?.getStringExtra(EXTRA_AVRDUDE_ARGS)
+                            ?: throw IllegalArgumentException("AVRDUDE arguments are missing")
+                        runAvrdude(reporter, decodeArguments(encodedArgs))
                     }
-                    else -> throw IllegalArgumentException("action must be 'signature' or 'flash'")
+                    else -> throw IllegalArgumentException("action must be 'run'")
                 }
             } catch (error: Exception) {
                 reporter.error(error.message ?: error.javaClass.simpleName, error)
@@ -100,7 +92,7 @@ class FlashService : Service() {
         val manager = getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             manager.createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "ATtiny flashing", NotificationManager.IMPORTANCE_LOW)
+                NotificationChannel(CHANNEL_ID, "Andruino Flash", NotificationManager.IMPORTANCE_LOW)
             )
         }
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -110,7 +102,7 @@ class FlashService : Service() {
             Notification.Builder(this)
         }
         val notification = builder
-            .setContentTitle("ATtiny UPDI operation")
+            .setContentTitle("Andruino Flash operation")
             .setContentText("AVRDUDE is running")
             .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setOngoing(true)
@@ -127,36 +119,42 @@ class FlashService : Service() {
         }
     }
 
-    private fun runAvrdude(reporter: RunReporter, firmwarePath: String?) {
+    private fun runAvrdude(reporter: RunReporter, avrdudeArgs: List<String>) {
         val requestId = reporter.requestId
         val usbManager = getSystemService(USB_SERVICE) as UsbManager
-        val device = usbManager.deviceList.values.firstOrNull {
-            it.vendorId == CH340_VENDOR_ID && it.productId == CH340_PRODUCT_ID
-        } ?: throw IOException("CH340 adapter 1a86:7523 is not connected")
-
         val driver = UsbSerialProber.getDefaultProber()
             .findAllDrivers(usbManager)
-            .firstOrNull { it.device.deviceId == device.deviceId }
-            ?: throw IOException("No supported USB serial driver for 1a86:7523")
+            .firstOrNull()
+            ?: throw IOException("No supported USB serial adapter is connected")
+        val device = driver.device
+        val baudRateArgument = findOptionValue(avrdudeArgs, "-b")
+        val baudRate = baudRateArgument?.toIntOrNull() ?: if (baudRateArgument == null) {
+            DEFAULT_BAUD_RATE
+        } else {
+            throw IllegalArgumentException("Invalid AVRDUDE baud rate: $baudRateArgument")
+        }
+        if (baudRate <= 0) {
+            throw IllegalArgumentException("AVRDUDE baud rate must be positive")
+        }
 
         obtainUsbPermission(usbManager, device)
         val connection = usbManager.openDevice(device)
-            ?: throw IOException("Android could not open the CH340 device")
+            ?: throw IOException("Android could not open USB serial device ${device.deviceName}")
         val port = driver.ports.firstOrNull()
             ?: run {
                 connection.close()
-                throw IOException("The CH340 driver exposes no serial port")
+                throw IOException("USB serial device ${device.deviceName} exposes no serial port")
             }
         val serial = SerialSession(connection, port)
         try {
             port.open(connection)
-            port.setParameters(BAUD_RATE, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
+            port.setParameters(baudRate, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
             port.setDTR(false)
-            Thread.sleep(250)
+            Thread.sleep(50)
             port.setDTR(true)
-            Thread.sleep(100)
+            Thread.sleep(50)
             port.setDTR(false)
-            Thread.sleep(1200)
+            Thread.sleep(if (findOptionValue(avrdudeArgs, "-c") == "jtag2updi") 1200 else 100)
         } catch (error: Exception) {
             serial.close()
             throw error
@@ -180,39 +178,22 @@ class FlashService : Service() {
                 }
             }
 
-            val args = mutableListOf(
-                avrdude.absolutePath,
-                "-C", config.absolutePath,
-                "-c", "jtag2updi",
-                "-P", "COM",
-                "-b", BAUD_RATE.toString(),
-                "-p", "t1614",
-                "-v"
-            )
-            if (firmwarePath == null) {
-                args.addAll(listOf("-U", "signature:r:-:h"))
-            } else {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
-                    !Environment.isExternalStorageManager()
-                ) {
-                    throw IOException("Grant all-files access in the app before flashing a shared-storage file")
-                }
-                val firmware = File(firmwarePath).canonicalFile
-                if (!firmware.isFile || !firmware.canRead()) {
-                    throw IOException("Firmware is not a readable file: $firmwarePath")
-                }
-                args.add("-e")
-                args.addAll(listOf("-U", "flash:w:${firmware.absolutePath}:i"))
-            }
+            val safeArgs = enforceAndroidUsbPort(avrdudeArgs)
+            val args = mutableListOf(avrdude.absolutePath, "-C", config.absolutePath)
+            args.addAll(safeArgs)
+            args.addAll(listOf("-P", "COM"))
 
             reporter.info(
-                "USB=${device.deviceName} fd=$usbFileDescriptor " +
+                "USB=${device.deviceName} VID=${device.vendorId.toString(16)} " +
+                    "PID=${device.productId.toString(16)} fd=$usbFileDescriptor " +
                     "in=0x${inputEndpoint.toString(16)} out=0x${outputEndpoint.toString(16)}"
             )
+            reporter.info("COMMAND ${args.drop(1).joinToString(" ") { shellQuote(it) }}")
             val nativeResult = UsbAvrdudeNative.runAvrdude(
                 usbFileDescriptor,
                 inputEndpoint,
                 outputEndpoint,
+                device.vendorId == CH340_VENDOR_ID && device.productId == CH340_PRODUCT_ID,
                 args.toTypedArray()
             )
             val output = nativeResult.getOrNull(1)
@@ -233,6 +214,71 @@ class FlashService : Service() {
         }
     }
 
+    private fun decodeArguments(encoded: String): List<String> {
+        if (encoded.length > MAX_ENCODED_ARGS_LENGTH) {
+            throw IllegalArgumentException("AVRDUDE argument payload is too large")
+        }
+        val bytes = try {
+            Base64.decode(encoded, Base64.NO_WRAP)
+        } catch (error: IllegalArgumentException) {
+            throw IllegalArgumentException("AVRDUDE argument payload is not valid Base64", error)
+        }
+        val decoded = bytes.toString(Charsets.UTF_8)
+        if (!decoded.endsWith('\u0000')) {
+            throw IllegalArgumentException("AVRDUDE argument payload is incomplete")
+        }
+        val arguments = decoded.split('\u0000').dropLast(1)
+        if (arguments.isEmpty() || arguments.size > MAX_AVRDUDE_ARGUMENTS ||
+            arguments.any { it.isEmpty() || it.length > MAX_ARGUMENT_LENGTH }
+        ) {
+            throw IllegalArgumentException("AVRDUDE arguments are empty or exceed supported limits")
+        }
+        return arguments
+    }
+
+    private fun findOptionValue(arguments: List<String>, option: String): String? {
+        val optionIndex = arguments.indexOfLast { it == option }
+        return if (optionIndex >= 0) arguments.getOrNull(optionIndex + 1) else null
+    }
+
+    private fun enforceAndroidUsbPort(arguments: List<String>): List<String> {
+        val safeArguments = mutableListOf<String>()
+        var index = 0
+        while (index < arguments.size) {
+            val argument = arguments[index]
+            when {
+                argument == "-P" || argument == "--port" -> {
+                    val port = arguments.getOrNull(index + 1)
+                        ?: throw IllegalArgumentException("$argument requires a value")
+                    if (port != "COM") {
+                        throw IllegalArgumentException("The Android USB-FD transport requires port COM")
+                    }
+                    index += 2
+                }
+                argument.startsWith("-P") && argument.length > 2 -> {
+                    if (argument.removePrefix("-P").removePrefix("=") != "COM") {
+                        throw IllegalArgumentException("The Android USB-FD transport requires port COM")
+                    }
+                    index++
+                }
+                argument.startsWith("--port=") -> {
+                    if (argument.substringAfter('=') != "COM") {
+                        throw IllegalArgumentException("The Android USB-FD transport requires port COM")
+                    }
+                    index++
+                }
+                else -> {
+                    safeArguments.add(argument)
+                    index++
+                }
+            }
+        }
+        return safeArguments
+    }
+
+    private fun shellQuote(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
+
     private fun findBulkEndpoints(device: UsbDevice): Pair<Int, Int> {
         var inputEndpoint = -1
         var outputEndpoint = -1
@@ -249,7 +295,7 @@ class FlashService : Service() {
             }
         }
         if (inputEndpoint < 0 || outputEndpoint < 0) {
-            throw IOException("CH340 device does not expose bulk IN and OUT endpoints")
+            throw IOException("USB serial adapter does not expose bulk IN and OUT endpoints")
         }
         return inputEndpoint to outputEndpoint
     }
@@ -299,7 +345,7 @@ class FlashService : Service() {
         }
         val directory = File(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-            "AttinyFlash"
+            "AndruinoFlash"
         )
         if (!directory.isDirectory && !directory.mkdirs()) {
             throw IOException("Could not create result directory ${directory.path}")
@@ -354,16 +400,18 @@ class FlashService : Service() {
     companion object {
         const val EXTRA_ACTION = "action"
         const val EXTRA_REQUEST_ID = "requestId"
-        const val EXTRA_FIRMWARE = "firmware"
-        const val ACTION_SIGNATURE = "signature"
-        const val ACTION_FLASH = "flash"
+        const val EXTRA_AVRDUDE_ARGS = "avrdudeArgs"
+        const val ACTION_RUN = "run"
 
-        private const val TAG = "AttinyFlash"
-        private const val CHANNEL_ID = "attiny_flash"
-        private const val NOTIFICATION_ID = 1614
+        private const val TAG = "AndruinoFlash"
+        private const val CHANNEL_ID = "andruino_flash"
+        private const val NOTIFICATION_ID = 1101
         private const val CH340_VENDOR_ID = 0x1A86
         private const val CH340_PRODUCT_ID = 0x7523
-        private const val BAUD_RATE = 115200
+        private const val DEFAULT_BAUD_RATE = 115200
+        private const val MAX_ENCODED_ARGS_LENGTH = 100_000
+        private const val MAX_AVRDUDE_ARGUMENTS = 256
+        private const val MAX_ARGUMENT_LENGTH = 16_384
         private val REQUEST_ID_PATTERN = Regex("[A-Za-z0-9._-]{1,80}")
     }
 }

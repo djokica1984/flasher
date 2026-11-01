@@ -15,5 +15,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "AttinyFlash"
+rootProject.name = "AndruinoFlash"
 include(":app")

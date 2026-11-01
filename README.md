@@ -1,11 +1,18 @@
-# ATtiny UPDI Flash
+# Andruino Flash
 
-An Android USB-host app for flashing an ATtiny1614 through an Arduino Uno running
-JTAG2UPDI. AVRDUDE 8.3 is bundled in the APK; no Termux AVRDUDE package is used
-at runtime. Android USB APIs open and initialize the Uno's CH340 adapter
-(`1a86:7523`). The app passes that USB file descriptor to the bundled AVRDUDE
-process, whose Android serial backend uses USB bulk/control transfers directly.
-There is no PTY, socket, or Java serial read/write bridge.
+Andruino Flash is an Android USB-host app that runs bundled AVRDUDE 8.3 and
+exposes its command-line options through a Termux command. The USB serial
+connection is opened by Android; AVRDUDE inherits the authorized USB file
+descriptor and performs serial bulk transfers directly. No Termux AVRDUDE,
+PTY, socket, or Java serial-data proxy is used.
+
+The app supports USB-serial adapters recognized by
+`usb-serial-for-android` and serial programmers configured in the bundled
+AVRDUDE configuration. This includes common CH340/CH341, FTDI, CP210x, PL2303,
+and CDC-ACM adapters. AVRDUDE programmers that require their own USB protocol
+(for example, USBasp or Atmel ICE) are not supported by the current USB-serial
+file-descriptor backend. A programmer/target combination must also be
+electrically and protocol-compatible with the board.
 
 ## Build
 
@@ -18,48 +25,64 @@ debug APK with:
 ```
 
 The APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
-The bundled `arm64-v8a` AVRDUDE executable was built from `avrdude-upstream/`;
-the Android CH340 USB-FD backend is in `avrdude-upstream/src/ser_posix.c`.
-AVRDUDE's GPL license is in `avrdude-upstream/COPYING`. Gradle packages the
-prebuilt executable from `app/src/main/jniLibs/arm64-v8a/libavrdude.so`; it
-does not rebuild AVRDUDE.
+AVRDUDE's Android USB-serial backend is in
+`avrdude-upstream/src/ser_posix.c`; the GPL license is in
+`avrdude-upstream/COPYING`. Gradle packages the prebuilt executable from
+`app/src/main/jniLibs/arm64-v8a/libavrdude.so`.
 
 ## First use and CLI
 
-Install the APK, launch it once, and grant the app Android's All files access
-setting if you want to pass absolute firmware paths from Termux. Connect the Uno
-to the phone with USB OTG and approve the Android USB access prompt for the CH340
-device. Android controls whether this grant survives a disconnect or reboot.
+Install the debug APK with ADB:
 
-Copy `tools/attiny-flash` into Termux's `~/bin/` and make it executable. The
-script starts the app's foreground service and streams its result log to the
-SSH session:
-
-```sh
-attiny-flash signature
-attiny-flash flash /storage/emulated/0/Download/firmware.hex
+```powershell
+adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-The app's All files access permission is broad. It is requested because Android's
-scoped-storage rules otherwise prevent an unattended service from opening an
-arbitrary `.hex` path supplied by the Termux CLI.
+Launch **Andruino Flash**. Grant All files access if firmware is stored in
+shared storage, then authorize the USB-serial device. Android may
+require authorization again after reinstalling the renamed app or when a
+different USB device is connected.
 
-The app validates the requested action and firmware path, uses AVRDUDE's
-`jtag2updi` programmer with the same serial-port token and core options used by
-ZFlasher (`-P COM -b 115200 -p t1614`). The USB file descriptor is inherited by
-AVRDUDE and used for CH340 USBFS control and bulk ioctls; the app does not proxy
-the serial stream. Flashing uses `-e -U flash:w:<firmware>:i`, matching
-ZFlasher's Flash erase option, and AVRDUDE's default write verification remains
-enabled. Output and result status are written to
-`Download/AttinyFlash/<request-id>.log`, which the Termux CLI streams to the SSH
-session.
-Flashing overwrites the ATtiny1614 flash; use a known-good Intel HEX image.
+Copy `tools/andruino-flash` to Termux's `~/bin/`, make it executable, and ensure
+that directory is on `PATH`. If you first copied the script to shared Downloads:
 
-## Scope and limitations
+```sh
+cp /storage/emulated/0/Download/andruino-flash ~/bin/andruino-flash
+chmod +x ~/bin/andruino-flash
+```
 
-- The first build targets the connected SM-A556B (`arm64-v8a`) and CH340 adapter.
-- USB permission is granted by Android to this app, not by SSH/ADB pairing.
-- The Termux command is a client interface; USB access and AVRDUDE execution
-  happen inside the Android app.
-- The app does not bundle a firmware image. The flash command must receive a
-  readable path that the app can access under Android's storage rules.
+The convenience commands retain the original JTAG2UPDI/ATtiny1614 defaults:
+
+```sh
+andruino-flash signature
+andruino-flash flash /storage/emulated/0/Download/firmware.hex
+```
+
+For other AVRDUDE targets and options, `run` passes arguments through to the
+bundled AVRDUDE:
+
+```sh
+andruino-flash run -- -c arduino -b 115200 -p m328p \
+  -U flash:w:/storage/emulated/0/Download/uno.hex:i -v
+```
+
+That example is for an Arduino Uno with a compatible USB-serial connection and
+bootloader. A classic Nano with an older bootloader often needs `-b 57600`
+instead. Use the `-c` programmer ID and `-p` part ID from the bundled
+`avrdude.conf`; all other AVRDUDE command-line options, including memory
+operations (`-U`), erase (`-e`), disabling verification (`-V`), verbosity, and fuse
+operations, can be supplied after `run --`.
+
+Android owns the USB port, so the app always sets AVRDUDE's port to `COM` and
+rejects attempts to select a different `-P` port. The app applies the supplied
+`-b` baud rate to the Android USB-serial driver before launching AVRDUDE. If
+omitted, it defaults to 115200. The application ID is now
+`com.example.andruinoflash`; the earlier ATtiny-only app, if installed, is a
+separate Android package.
+If multiple supported USB-serial adapters are connected, the app uses the first
+one reported by Android; connect only the intended programmer.
+
+The app writes output and result status to
+`Download/AndruinoFlash/<request-id>.log`, which the Termux script streams to
+the terminal. USB access is granted to the Android app, not to Termux or SSH.
+Flashing overwrites the selected AVR memory; use a known-good firmware image.
