@@ -1,6 +1,7 @@
 #include "control_bus.h"
 
 #include <Arduino.h>
+#include <EEPROM.h>
 #include <SoftwareSerial.h>
 #include <ctype.h>
 #include <stdio.h>
@@ -17,10 +18,15 @@ const uint16_t BUS_BAUD = 2400;
 const uint16_t RESPONSE_TIMEOUT_MS = 700;
 const uint8_t REQUEST_ATTEMPTS = 3;
 const uint8_t RETRY_DELAY_MS = 20;
-const uint8_t RESPONSE_SIZE = 64;
+const uint8_t RESPONSE_SIZE = 96;
+const uint8_t EEPROM_MODE_ADDRESS = 0;
+const uint8_t EEPROM_SELECTED_ADDRESS = 1;
+const uint8_t EEPROM_MAGIC_ADDRESS = 2;
+const uint8_t EEPROM_MAGIC = 0xA7;
 
 SoftwareSerial busSerial(BUS_PIN, BUS_PIN);
 bool communicationMode = true;
+uint8_t selectedNode = 0;
 
 uint8_t beginBusRuntime() {
   const uint8_t savedStatus = SREG;
@@ -113,6 +119,39 @@ void makeNodeError(uint8_t node, char *response, size_t responseSize) {
   snprintf(response, responseSize, "ERR NO RESPONSE FROM NODE %u", node);
 }
 
+bool setNodesMode(bool communication) {
+  char modeCommand[] = "MODE COMM";
+  if (!communication) strcpy(modeCommand, "MODE FLASH");
+  char response[RESPONSE_SIZE];
+  for (uint8_t node = FIRST_NODE; node <= LAST_NODE; ++node) {
+    if (!requestNode(node, modeCommand, response, sizeof(response))) {
+      makeNodeError(node, response, sizeof(response));
+      writeHostLine(response);
+      return false;
+    }
+  }
+  communicationMode = communication;
+  EEPROM.update(EEPROM_MODE_ADDRESS, communication ? 0 : 1);
+  EEPROM.update(EEPROM_MAGIC_ADDRESS, EEPROM_MAGIC);
+  return true;
+}
+
+void writeSystemModeResponse() {
+  char result[RESPONSE_SIZE];
+  if (selectedNode == 0) {
+    snprintf(result, sizeof(result), "OK MODE %s; NODES 1,2 MODE %s; SELECT NONE",
+             communicationMode ? "COMM" : "FLASH",
+             communicationMode ? "COMM" : "FLASH");
+  } else {
+    snprintf(result, sizeof(result),
+             "OK MODE %s; NODES 1,2 MODE %s; SELECT NODE %u",
+             communicationMode ? "COMM" : "FLASH",
+             communicationMode ? "COMM" : "FLASH",
+             selectedNode);
+  }
+  writeHostLine(result);
+}
+
 void handleCommand(char *line) {
   for (char *character = line; *character; ++character) {
     *character = (char)toupper((unsigned char)*character);
@@ -131,21 +170,11 @@ void handleCommand(char *line) {
       return;
     }
     if (strcmp(mode, "COMM") == 0) {
-      char response[RESPONSE_SIZE];
-      for (uint8_t node = FIRST_NODE; node <= LAST_NODE; ++node) {
-        if (!requestNode(node, "MODE COMM", response, sizeof(response))) {
-          makeNodeError(node, response, sizeof(response));
-          writeHostLine(response);
-          return;
-        }
-      }
-      communicationMode = true;
-      writeHostLine("OK MASTER MODE COMM; NODES 1,2 MODE COMM");
+      if (setNodesMode(true)) writeSystemModeResponse();
       return;
     }
     if (strcmp(mode, "FLASH") == 0) {
-      communicationMode = false;
-      writeHostLine("OK MASTER MODE FLASH; JTAG2UPDI ACTIVE");
+      if (setNodesMode(false)) writeSystemModeResponse();
       return;
     }
     writeHostLine("ERR MODE USE COMM OR FLASH");
@@ -160,30 +189,22 @@ void handleCommand(char *line) {
       return;
     }
     char response[RESPONSE_SIZE];
-    const uint8_t other = selected == FIRST_NODE ? LAST_NODE : FIRST_NODE;
-    char selectedCommand[] = "MODE FLASH";
-    char communicationCommand[] = "MODE COMM";
-    if (!requestNode(selected, selectedCommand, response, sizeof(response))) {
-      makeNodeError(selected, response, sizeof(response));
-      writeHostLine(response);
-      return;
+    char selectCommand[12];
+    snprintf(selectCommand, sizeof(selectCommand), "SELECT %u", selected);
+    for (uint8_t node = FIRST_NODE; node <= LAST_NODE; ++node) {
+      if (!requestNode(node, selectCommand, response, sizeof(response))) {
+        makeNodeError(node, response, sizeof(response));
+        writeHostLine(response);
+        return;
+      }
     }
-    if (!requestNode(other, communicationCommand, response, sizeof(response))) {
-      makeNodeError(other, response, sizeof(response));
-      writeHostLine(response);
-      return;
-    }
-    communicationMode = false;
+    selectedNode = selected;
+    EEPROM.update(EEPROM_SELECTED_ADDRESS, selectedNode);
+    EEPROM.update(EEPROM_MAGIC_ADDRESS, EEPROM_MAGIC);
     char result[RESPONSE_SIZE];
-    snprintf(result, sizeof(result),
-             "OK MASTER MODE FLASH; NODE %u SELECTED; NODE %u MODE COMM",
-             selected, other);
+    snprintf(result, sizeof(result), "OK SELECT NODE %u; SYSTEM MODE %s",
+             selected, communicationMode ? "COMM" : "FLASH");
     writeHostLine(result);
-    return;
-  }
-
-  if (!communicationMode) {
-    writeHostLine("ERR MASTER IN FLASH MODE; USE MODE COMM OR SELECT");
     return;
   }
 
@@ -226,6 +247,23 @@ void handleCommand(char *line) {
 
 namespace ControlBus {
 void init() {
+  if (EEPROM.read(EEPROM_MAGIC_ADDRESS) == EEPROM_MAGIC) {
+    const uint8_t storedMode = EEPROM.read(EEPROM_MODE_ADDRESS);
+    const uint8_t storedSelection = EEPROM.read(EEPROM_SELECTED_ADDRESS);
+    if (storedMode <= 1 && storedSelection <= LAST_NODE) {
+      communicationMode = storedMode == 0;
+      selectedNode = storedSelection;
+    } else {
+      communicationMode = true;
+      selectedNode = 0;
+    }
+  } else {
+    communicationMode = true;
+    selectedNode = 0;
+    EEPROM.update(EEPROM_MODE_ADDRESS, 0);
+    EEPROM.update(EEPROM_SELECTED_ADDRESS, 0);
+    EEPROM.update(EEPROM_MAGIC_ADDRESS, EEPROM_MAGIC);
+  }
   busSerial.begin(BUS_BAUD);
   releaseBus();
 }

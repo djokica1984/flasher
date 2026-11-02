@@ -149,12 +149,19 @@ andruino-flash bus --usb-device "$UNO_USB" SELECT 1
 andruino-flash bus --usb-device "$UNO_USB" MODE COMM
 ```
 
-`SELECT 1` marks node 1 as software FLASH and node 2 as COMM; `SELECT 2`
-reverses those states. This does **not** electrically isolate either UPDI pin
-or select the physical UPDI connection. Continue manually switching UPDI to
-the target being programmed. USB programming may reset the Uno and the ATtiny,
-so mode state can be lost. See the [control-bus wiring and complete command
-reference](docs/REPRODUCING.md#8-uno-control-bus-for-two-attiny1614-nodes).
+`MODE FLASH` and `MODE COMM` set the system-wide state on the Uno and both
+nodes. `SELECT 1` or `SELECT 2` sends the target ID to both nodes; each node
+records whether it is selected without changing either node's mode. These
+software states do **not** electrically isolate either UPDI pin or select the
+physical UPDI connection. Continue manually switching UPDI to the target being
+programmed. Enter system-wide `MODE FLASH`, use `SELECT 1` or `SELECT 2` to
+record the intended target at both nodes, and use `MODE COMM` to leave flashing
+mode. In FLASH mode the selected node's LED is solid ON and the other node's
+LED is OFF; in COMM mode both nodes retain their configured blink behavior.
+For LEDs wired from VDD through a resistor to PA5, the output is active-low:
+PA5 LOW lights the LED and PA5 HIGH turns it off.
+Mode and selection state persist across resets in EEPROM. See the
+[control-bus wiring and complete command reference](docs/REPRODUCING.md#8-uno-control-bus-for-two-attiny1614-nodes).
 
 The Uno profile uses the Arduino bootloader at 115200 baud. The Nano profile
 uses the old bootloader at 57600 baud. The ATtiny1614 profile uses JTAG2UPDI at

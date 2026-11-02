@@ -362,6 +362,13 @@ ATtiny1614 nodes. Connect Uno D5 to each node's PB3/RX signal through its own
 through its own 1 kOhm series resistor. Use the pinout for your exact ATtiny
 package or breakout board to locate PB3 and PB2; do not rely on package pin
 numbers from an example. Connect all grounds together.
+For an indicator LED wired from VDD through a current-limiting resistor to
+PA5, the output is active-low: PA5 LOW lights the LED, and PA5 HIGH turns it
+off. In FLASH mode the selected node LED is solid ON and the other is OFF.
+`STATUS` includes the firmware-commanded LED state (`LED ON` or `LED OFF`);
+this confirms the node's logic but does not measure the physical pin voltage.
+The updated LED-polarity firmware identifies itself as
+`ANDRUINO-ATTINY1614-BUS-2` with the `VERSION` command.
 Install node 1 firmware from `attiny1614/BlinkNode1` and node 2 firmware from
 `attiny1614/BlinkNode2`. Both use the shared
 `attiny1614/libraries/AndruinoBusNode` library; keep the `libraries` directory
@@ -397,23 +404,49 @@ andruino-flash bus --usb-device "$UNO_USB" MODE COMM
 andruino-flash bus --usb-device "$UNO_USB" MODE FLASH
 ```
 
-`SELECT 1` puts node 1 into software FLASH mode and node 2 into COMM mode;
-`SELECT 2` does the reverse. `MODE COMM` asks both nodes to resume
-communication mode. `MODE FLASH` sets the Uno master to its software FLASH
-state but does not choose either node. While in master FLASH mode, use
-`SELECT <1|2>` or `MODE COMM` to change state. Blink interval commands are
-accepted only for nodes in COMM mode. Each command prints the Uno response as
-`BUS_RESPONSE ...`; absent nodes or malformed commands return an error. The Uno
-retries each addressed bus request up to three times and ignores stale or
+`MODE FLASH` sets the Uno and both nodes to system-wide FLASH mode;
+`MODE COMM` sets all three back to communication mode. These mode commands
+are sent individually to each addressed node to avoid multiple simultaneous
+replies on the half-duplex bus. `SELECT 1` or `SELECT 2` informs both nodes of
+the chosen target. Each node records whether its own address matches the
+selection, while both remain in the current system mode. For example:
+
+```sh
+# Enter system-wide flash mode, then select node 1.
+andruino-flash bus --usb-device "$UNO_USB" MODE FLASH
+andruino-flash bus --usb-device "$UNO_USB" SELECT 1
+andruino-flash bus --usb-device "$UNO_USB" STATUS 1
+andruino-flash bus --usb-device "$UNO_USB" STATUS 2
+
+# After manually moving UPDI to node 1 and flashing it, select node 2.
+andruino-flash bus --usb-device "$UNO_USB" SELECT 2
+
+# Exit flash mode only when the system should resume normal operation.
+andruino-flash bus --usb-device "$UNO_USB" MODE COMM
+```
+
+In FLASH mode, both status replies should report `MODE FLASH`; the selected
+node reports `SELECTION SELECTED`, and the other reports
+`SELECTION NOT_SELECTED`. The selected node's LED is solid ON and the other
+node's LED is OFF. In COMM mode, both LEDs follow their configured blink
+intervals. `PING`, `STATUS`, `VERSION`, and mode/selection control remain
+available while in FLASH mode; blink changes are only accepted while the
+addressed node is in COMM mode.
+
+The Uno and nodes persist system mode and selection in EEPROM, so programming
+or resetting a selected node does not silently put it back in COMM mode or
+forget which target was selected. Each command prints the Uno response as
+`BUS_RESPONSE ...`; absent nodes or malformed commands return an error. The
+Uno retries each addressed bus request up to three times and ignores stale or
 other-node response lines. The Android service allows up to ten seconds for a
 command response.
 
 **These are software states only, not UPDI electrical isolation or a hardware
 target selector.** This implementation does not make it safe to leave both
 UPDI pins connected to a shared UPDI line. Continue manually switching the
-UPDI connection to the target being programmed. USB programming can reset the
-Uno and the ATtiny being programmed, so reissue `SELECT` or `MODE COMM` after
-flashing as needed; the mode state is volatile.
+UPDI connection to the target being programmed. EEPROM persistence depends on
+the device's EEPROM-preserve setting during chip erase; the supplied ATtiny
+profile enables EEPROM preservation.
 
 ## 9. Verify and troubleshoot
 
