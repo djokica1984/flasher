@@ -16,10 +16,12 @@ import android.hardware.usb.UsbManager
 import android.os.Build
 import android.os.Environment
 import android.os.IBinder
+import android.os.SystemClock
 import android.util.Base64
 import android.util.Log
 import com.hoho.android.usbserial.driver.UsbSerialPort
 import com.hoho.android.usbserial.driver.UsbSerialProber
+import java.io.ByteArrayOutputStream
 import java.io.Closeable
 import java.io.File
 import java.io.FileOutputStream
@@ -62,6 +64,12 @@ class FlashService : Service() {
             try {
                 when (action) {
                     ACTION_DEVICES -> reportUsbDevices(reporter, usbManager)
+                    ACTION_BUS -> runBusCommand(
+                        reporter,
+                        intent?.getStringExtra(EXTRA_BUS_COMMAND)
+                            ?: throw IllegalArgumentException("Bus command is missing"),
+                        intent?.getStringExtra(EXTRA_USB_DEVICE)
+                    )
                     ACTION_RUN -> {
                         val encodedArgs = intent?.getStringExtra(EXTRA_AVRDUDE_ARGS)
                             ?: throw IllegalArgumentException("AVRDUDE arguments are missing")
@@ -71,7 +79,9 @@ class FlashService : Service() {
                             intent?.getStringExtra(EXTRA_USB_DEVICE)
                         )
                     }
-                    else -> throw IllegalArgumentException("action must be 'run' or 'devices'")
+                    else -> throw IllegalArgumentException(
+                        "action must be 'run', 'devices', or 'bus'"
+                    )
                 }
             } catch (error: Exception) {
                 reporter.error(error.message ?: error.javaClass.simpleName, error)
@@ -103,7 +113,7 @@ class FlashService : Service() {
         }
         val notification = builder
             .setContentTitle("Andruino Flash operation")
-            .setContentText("AVRDUDE is running")
+            .setContentText("USB serial operation is running")
             .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setOngoing(true)
             .build()
@@ -133,6 +143,105 @@ class FlashService : Service() {
             )
         }
         reporter.info("RESULT success")
+    }
+
+    private fun runBusCommand(
+        reporter: RunReporter,
+        command: String,
+        requestedDeviceName: String?
+    ) {
+        if (!BUS_COMMAND_PATTERN.matches(command)) {
+            throw IllegalArgumentException(
+                "Unsupported bus command. Use PING, STATUS, VERSION, BLINK, MODE, or SELECT syntax."
+            )
+        }
+        val usbManager = getSystemService(USB_SERVICE) as UsbManager
+        val drivers = UsbSerialProber.getDefaultProber().findAllDrivers(usbManager)
+        if (drivers.isEmpty()) {
+            throw IOException("No supported USB serial adapter is connected")
+        }
+        val driver = if (requestedDeviceName != null) {
+            drivers.firstOrNull { it.device.deviceName == requestedDeviceName }
+                ?: throw IOException(
+                    "USB serial device '$requestedDeviceName' is not connected or is unsupported. " +
+                        "Run 'andruino-flash devices' to list supported devices."
+                )
+        } else {
+            if (drivers.size > 1) {
+                val paths = drivers.joinToString { it.device.deviceName }
+                throw IOException(
+                    "Multiple USB serial adapters are connected ($paths). " +
+                        "Specify one with --usb-device or run 'andruino-flash devices'."
+                )
+            }
+            drivers.single()
+        }
+        val device = driver.device
+        obtainUsbPermission(usbManager, device)
+        val connection = usbManager.openDevice(device)
+            ?: throw IOException("Android could not open USB serial device ${device.deviceName}")
+        val port = driver.ports.firstOrNull()
+            ?: run {
+                connection.close()
+                throw IOException("USB serial device ${device.deviceName} exposes no serial port")
+            }
+        val serial = SerialSession(connection, port)
+        try {
+            port.open(connection)
+            port.setParameters(
+                CONTROL_BAUD_RATE,
+                8,
+                UsbSerialPort.STOPBITS_1,
+                UsbSerialPort.PARITY_NONE
+            )
+            // JTAG2UPDI returns to its 19200-baud idle rate after host timeout.
+            // Do not toggle DTR here: that would reset the Uno and discard node mode.
+            Thread.sleep(CONTROL_IDLE_SETTLE_MS)
+
+            val payload = "@$command\n".toByteArray(Charsets.US_ASCII)
+            port.write(payload, CONTROL_IO_TIMEOUT_MS)
+            val response = readControlResponse(port)
+            reporter.info(
+                "USB=${device.deviceName} VID=${device.vendorId.toString(16)} " +
+                    "PID=${device.productId.toString(16)}"
+            )
+            reporter.info("BUS_COMMAND $command")
+            reporter.info("BUS_RESPONSE $response")
+            if (response.startsWith("ERR ")) {
+                throw IOException(response)
+            }
+            reporter.info("RESULT success")
+        } finally {
+            serial.close()
+        }
+    }
+
+    private fun readControlResponse(port: UsbSerialPort): String {
+        val response = ByteArrayOutputStream()
+        val buffer = ByteArray(32)
+        val deadline = SystemClock.elapsedRealtime() + CONTROL_RESPONSE_TIMEOUT_MS
+        while (SystemClock.elapsedRealtime() < deadline) {
+            val remaining = (deadline - SystemClock.elapsedRealtime()).coerceAtLeast(1)
+            val count = port.read(buffer, minOf(CONTROL_IO_TIMEOUT_MS.toLong(), remaining).toInt())
+            for (index in 0 until count) {
+                val character = buffer[index]
+                if (character == '\n'.code.toByte()) {
+                    val line = response.toString(Charsets.US_ASCII.name()).trim()
+                    if (line.isNotEmpty()) return line
+                    throw IOException("Uno returned an empty control-bus response")
+                }
+                if (character != '\r'.code.toByte()) {
+                    if (response.size() >= MAX_CONTROL_RESPONSE_LENGTH) {
+                        throw IOException("Uno control-bus response exceeded the size limit")
+                    }
+                    response.write(character.toInt())
+                }
+            }
+        }
+        throw IOException(
+            "Timed out waiting for the Uno control-bus response. " +
+                "Confirm JTAG2UPDI with control-bus support is installed."
+        )
     }
 
     private fun runAvrdude(
@@ -437,9 +546,11 @@ class FlashService : Service() {
         const val EXTRA_ACTION = "action"
         const val EXTRA_REQUEST_ID = "requestId"
         const val EXTRA_AVRDUDE_ARGS = "avrdudeArgs"
+        const val EXTRA_BUS_COMMAND = "busCommand"
         const val EXTRA_USB_DEVICE = "usbDevice"
         const val ACTION_RUN = "run"
         const val ACTION_DEVICES = "devices"
+        const val ACTION_BUS = "bus"
 
         private const val TAG = "AndruinoFlash"
         private const val CHANNEL_ID = "andruino_flash"
@@ -447,6 +558,14 @@ class FlashService : Service() {
         private const val CH340_VENDOR_ID = 0x1A86
         private const val CH340_PRODUCT_ID = 0x7523
         private const val DEFAULT_BAUD_RATE = 115200
+        private const val CONTROL_BAUD_RATE = 19200
+        private const val CONTROL_IDLE_SETTLE_MS = 2500L
+        private const val CONTROL_IO_TIMEOUT_MS = 500
+        private const val CONTROL_RESPONSE_TIMEOUT_MS = 10000L
+        private const val MAX_CONTROL_RESPONSE_LENGTH = 120
+        private val BUS_COMMAND_PATTERN = Regex(
+            "(?i)(PING|STATUS|VERSION) [12]|BLINK [12] (200|1000)|MODE (COMM|FLASH)|SELECT [12]"
+        )
         private const val MAX_ENCODED_ARGS_LENGTH = 100_000
         private const val MAX_AVRDUDE_ARGUMENTS = 256
         private const val MAX_ARGUMENT_LENGTH = 16_384

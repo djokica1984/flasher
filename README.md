@@ -135,6 +135,27 @@ andruino-flash flash-platform --usb-device "$NANO_USB" attiny1614 \
   "$ROOT/attiny1614/Blink1000/Blink1000.ino.hex"
 ```
 
+### Uno control bus
+
+The optional Uno JTAG2UPDI build supports two addressed ATtiny1614 nodes on a
+half-duplex bus. After installing the modified Uno and node firmware, issue
+commands through the Uno's explicit USB path:
+
+```sh
+andruino-flash bus --usb-device "$UNO_USB" PING 1
+andruino-flash bus --usb-device "$UNO_USB" STATUS 2
+andruino-flash bus --usb-device "$UNO_USB" BLINK 2 200
+andruino-flash bus --usb-device "$UNO_USB" SELECT 1
+andruino-flash bus --usb-device "$UNO_USB" MODE COMM
+```
+
+`SELECT 1` marks node 1 as software FLASH and node 2 as COMM; `SELECT 2`
+reverses those states. This does **not** electrically isolate either UPDI pin
+or select the physical UPDI connection. Continue manually switching UPDI to
+the target being programmed. USB programming may reset the Uno and the ATtiny,
+so mode state can be lost. See the [control-bus wiring and complete command
+reference](docs/REPRODUCING.md#8-uno-control-bus-for-two-attiny1614-nodes).
+
 The Uno profile uses the Arduino bootloader at 115200 baud. The Nano profile
 uses the old bootloader at 57600 baud. The ATtiny1614 profile uses JTAG2UPDI at
 115200 baud. `--platform` selects the compile target and AVRDUDE protocol;

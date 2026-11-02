@@ -192,24 +192,17 @@ The committed samples include Blink300 and Blink3000 for Uno, Nano, and
 ATtiny1614. The earlier Blink1000/Blink200 examples are part of the existing
 phone sketch tree but are not required for this guide.
 
-### Add the JTAG2UPDI sketch
+### JTAG2UPDI firmware
 
-The JTAG2UPDI firmware source is maintained separately from this repository.
-In Termux, download the upstream source and copy the sketch source files into
-both programmer sketch folders:
-
-```sh
-git clone https://github.com/ElTangas/jtag2updi.git ~/src/jtag2updi
-ROOT=/storage/emulated/0/Download/andruino
-mkdir -p "$ROOT/uno/jtag2updi" "$ROOT/nano/jtag2updi"
-cp -R ~/src/jtag2updi/source/. "$ROOT/uno/jtag2updi/"
-cp -R ~/src/jtag2updi/source/. "$ROOT/nano/jtag2updi/"
-```
-
-The source directory contains the Arduino-recognized `jtag2updi.ino` and its
-supporting files. Keep those files together. Follow the upstream instructions
-for the programmer MCU, pin assignments, and disabling auto-reset if needed
-for your board.
+This repository includes the JTAG2UPDI source for the Uno at
+`andruino/uno/jtag2updi`, including the control-bus extension. Copying the
+repository's `andruino` folder as described above installs it at
+`$ROOT/uno/jtag2updi`; do not overwrite this Uno version with unmodified
+upstream source. To use JTAG2UPDI on a Nano, obtain the source from
+[ElTangas/jtag2updi](https://github.com/ElTangas/jtag2updi) and keep its
+Arduino sketch and supporting source files together under
+`$ROOT/nano/jtag2updi`. The upstream source is MIT licensed; the included Uno
+source carries its upstream license.
 
 ## 5. Sketch layout and board profiles
 
@@ -361,7 +354,68 @@ For batch operations, put these commands in a shell script and run it from
 Termux. Review the board order: each `flash-sketch` invocation writes to the
 selected board immediately.
 
-## 8. Verify and troubleshoot
+## 8. Uno control bus for two ATtiny1614 nodes
+
+The optional bus firmware is for the **Uno JTAG2UPDI programmer** and two
+ATtiny1614 nodes. Connect Uno D5 to each node's PB3/RX signal through its own
+1 kOhm series resistor; connect each node's PB2/TX signal to the same bus
+through its own 1 kOhm series resistor. Use the pinout for your exact ATtiny
+package or breakout board to locate PB3 and PB2; do not rely on package pin
+numbers from an example. Connect all grounds together.
+Install node 1 firmware from `attiny1614/BlinkNode1` and node 2 firmware from
+`attiny1614/BlinkNode2`. Both use the shared
+`attiny1614/libraries/AndruinoBusNode` library; keep the `libraries` directory
+under `$ROOT/attiny1614` so the Termux build helper can find it.
+
+The Uno master uses D5 at 2400 baud and the Android app sends its control
+requests to the Uno's USB serial adapter at 19200 baud. Because JTAG2UPDI
+provides its own `main()` instead of Arduino's normal core startup, the master
+initializes the Arduino millisecond timer and enables interrupts only while
+processing a bus command. This supports SoftwareSerial reception without
+leaving periodic interrupts enabled during UPDI programming. Build and install
+the modified Uno programmer and both nodes:
+
+```sh
+andruino-flash flash-sketch --platform uno --usb-device "$UNO_USB" \
+  "$ROOT/uno/jtag2updi/jtag2updi.ino"
+andruino-flash flash-sketch --platform attiny1614 --usb-device "$UNO_USB" \
+  "$ROOT/attiny1614/BlinkNode1/BlinkNode1.ino"
+andruino-flash flash-sketch --platform attiny1614 --usb-device "$UNO_USB" \
+  "$ROOT/attiny1614/BlinkNode2/BlinkNode2.ino"
+```
+
+Use the new bus command with the Uno's current USB path (not a Nano path):
+
+```sh
+andruino-flash bus --usb-device "$UNO_USB" PING 1
+andruino-flash bus --usb-device "$UNO_USB" STATUS 2
+andruino-flash bus --usb-device "$UNO_USB" VERSION 1
+andruino-flash bus --usb-device "$UNO_USB" BLINK 2 200
+andruino-flash bus --usb-device "$UNO_USB" BLINK 1 1000
+andruino-flash bus --usb-device "$UNO_USB" SELECT 1
+andruino-flash bus --usb-device "$UNO_USB" MODE COMM
+andruino-flash bus --usb-device "$UNO_USB" MODE FLASH
+```
+
+`SELECT 1` puts node 1 into software FLASH mode and node 2 into COMM mode;
+`SELECT 2` does the reverse. `MODE COMM` asks both nodes to resume
+communication mode. `MODE FLASH` sets the Uno master to its software FLASH
+state but does not choose either node. While in master FLASH mode, use
+`SELECT <1|2>` or `MODE COMM` to change state. Blink interval commands are
+accepted only for nodes in COMM mode. Each command prints the Uno response as
+`BUS_RESPONSE ...`; absent nodes or malformed commands return an error. The Uno
+retries each addressed bus request up to three times and ignores stale or
+other-node response lines. The Android service allows up to ten seconds for a
+command response.
+
+**These are software states only, not UPDI electrical isolation or a hardware
+target selector.** This implementation does not make it safe to leave both
+UPDI pins connected to a shared UPDI line. Continue manually switching the
+UPDI connection to the target being programmed. USB programming can reset the
+Uno and the ATtiny being programmed, so reissue `SELECT` or `MODE COMM` after
+flashing as needed; the mode state is volatile.
+
+## 9. Verify and troubleshoot
 
 A successful compile prints `Built ...` and the HEX path. A successful flash
 ends with `RESULT success` and AVRDUDE output such as:
