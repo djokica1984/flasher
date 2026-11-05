@@ -354,10 +354,10 @@ For batch operations, put these commands in a shell script and run it from
 Termux. Review the board order: each `flash-sketch` invocation writes to the
 selected board immediately.
 
-## 8. Uno control bus for two ATtiny1614 nodes
+## 8. Uno control bus for up to three ATtiny1614 nodes
 
-The optional bus firmware is for the **Uno JTAG2UPDI programmer** and two
-ATtiny1614 nodes. Connect Uno D5 to each node's PB3/RX signal through its own
+The optional bus firmware is for the **Uno JTAG2UPDI programmer** and up to
+three ATtiny1614 nodes. Connect Uno D5 to each node's PB3/RX signal through its own
 1 kOhm series resistor; connect each node's PB2/TX signal to the same bus
 through its own 1 kOhm series resistor. Use the pinout for your exact ATtiny
 package or breakout board to locate PB3 and PB2; do not rely on package pin
@@ -365,12 +365,18 @@ numbers from an example. Connect all grounds together.
 For an indicator LED wired from VDD through a current-limiting resistor to
 PA5, the output is active-low: PA5 LOW lights the LED, and PA5 HIGH turns it
 off. In FLASH mode the selected node LED is solid ON and the other is OFF.
+On the standard 14-pin ATtiny1614 package, the node bus uses PB3/RX and PB2/TX
+(physical pins 6/7), and the active-low LED uses PA5 (physical pin 3). PB0
+(physical pin 9) is the inverted electrical level of PA5 only in FLASH mode:
+PB0 is HIGH while PA5 is LOW (LED lit), and PB0 is LOW while PA5 is HIGH (LED off).
+Treat PB0 as a logic output; do not
+connect it directly to the UPDI bus.
 `STATUS` includes the firmware-commanded LED state (`LED ON` or `LED OFF`);
 this confirms the node's logic but does not measure the physical pin voltage.
-The updated LED-polarity firmware identifies itself as
-`ANDRUINO-ATTINY1614-BUS-2` with the `VERSION` command.
-Install node 1 firmware from `attiny1614/BlinkNode1` and node 2 firmware from
-`attiny1614/BlinkNode2`. Both use the shared
+The updated node firmware identifies itself as
+`ANDRUINO-ATTINY1614-BUS-4` with the `VERSION` command.
+Install node firmware from `attiny1614/BlinkNode1`, `BlinkNode2`, and
+`BlinkNode3`. Each sketch uses the shared
 `attiny1614/libraries/AndruinoBusNode` library; keep the `libraries` directory
 under `$ROOT/attiny1614` so the Termux build helper can find it.
 
@@ -380,7 +386,7 @@ provides its own `main()` instead of Arduino's normal core startup, the master
 initializes the Arduino millisecond timer and enables interrupts only while
 processing a bus command. This supports SoftwareSerial reception without
 leaving periodic interrupts enabled during UPDI programming. Build and install
-the modified Uno programmer and both nodes:
+the modified Uno programmer and all three nodes:
 
 ```sh
 andruino-flash flash-sketch --platform uno --usb-device "$UNO_USB" \
@@ -389,6 +395,8 @@ andruino-flash flash-sketch --platform attiny1614 --usb-device "$UNO_USB" \
   "$ROOT/attiny1614/BlinkNode1/BlinkNode1.ino"
 andruino-flash flash-sketch --platform attiny1614 --usb-device "$UNO_USB" \
   "$ROOT/attiny1614/BlinkNode2/BlinkNode2.ino"
+andruino-flash flash-sketch --platform attiny1614 --usb-device "$UNO_USB" \
+  "$ROOT/attiny1614/BlinkNode3/BlinkNode3.ino"
 ```
 
 Use the new bus command with the Uno's current USB path (not a Nano path):
@@ -399,17 +407,22 @@ andruino-flash bus --usb-device "$UNO_USB" STATUS 2
 andruino-flash bus --usb-device "$UNO_USB" VERSION 1
 andruino-flash bus --usb-device "$UNO_USB" BLINK 2 200
 andruino-flash bus --usb-device "$UNO_USB" BLINK 1 1000
+andruino-flash bus --usb-device "$UNO_USB" PING 3
 andruino-flash bus --usb-device "$UNO_USB" SELECT 1
+andruino-flash bus --usb-device "$UNO_USB" SELECT 3
 andruino-flash bus --usb-device "$UNO_USB" MODE COMM
 andruino-flash bus --usb-device "$UNO_USB" MODE FLASH
 ```
 
-`MODE FLASH` sets the Uno and both nodes to system-wide FLASH mode;
-`MODE COMM` sets all three back to communication mode. These mode commands
+`MODE FLASH` sets the Uno and all installed nodes to system-wide FLASH mode;
+`MODE COMM` sets them back to communication mode. These mode commands
 are sent individually to each addressed node to avoid multiple simultaneous
-replies on the half-duplex bus. `SELECT 1` or `SELECT 2` informs both nodes of
-the chosen target. Each node records whether its own address matches the
-selection, while both remain in the current system mode. For example:
+replies on the half-duplex bus. `SELECT 1`, `SELECT 2`, or `SELECT 3` informs
+every installed node of the chosen target. Each node records whether its own
+address matches the selection, while all remain in the current system mode.
+Install and flash firmware for addresses 1, 2, and 3 before using system-mode
+or selection commands: the Uno iterates through all three addresses, so an
+absent node causes those commands to report an error. For example:
 
 ```sh
 # Enter system-wide flash mode, then select node 1.
@@ -417,18 +430,20 @@ andruino-flash bus --usb-device "$UNO_USB" MODE FLASH
 andruino-flash bus --usb-device "$UNO_USB" SELECT 1
 andruino-flash bus --usb-device "$UNO_USB" STATUS 1
 andruino-flash bus --usb-device "$UNO_USB" STATUS 2
+andruino-flash bus --usb-device "$UNO_USB" STATUS 3
 
-# After manually moving UPDI to node 1 and flashing it, select node 2.
+# After manually moving UPDI to a target, select that node before flashing.
 andruino-flash bus --usb-device "$UNO_USB" SELECT 2
+andruino-flash bus --usb-device "$UNO_USB" SELECT 3
 
 # Exit flash mode only when the system should resume normal operation.
 andruino-flash bus --usb-device "$UNO_USB" MODE COMM
 ```
 
-In FLASH mode, both status replies should report `MODE FLASH`; the selected
-node reports `SELECTION SELECTED`, and the other reports
+In FLASH mode, all nodes should report `MODE FLASH`; the selected
+node reports `SELECTION SELECTED`, and the others report
 `SELECTION NOT_SELECTED`. The selected node's LED is solid ON and the other
-node's LED is OFF. In COMM mode, both LEDs follow their configured blink
+nodes' LEDs are OFF. In COMM mode, each node's LED follows its configured blink
 intervals. `PING`, `STATUS`, `VERSION`, and mode/selection control remain
 available while in FLASH mode; blink changes are only accepted while the
 addressed node is in COMM mode.

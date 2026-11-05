@@ -13,7 +13,8 @@
 namespace {
 const uint8_t BUS_PIN = 5;
 const uint8_t FIRST_NODE = 1;
-const uint8_t LAST_NODE = 2;
+const uint8_t LAST_NODE = 3;
+uint8_t activeNodeMask = (_BV(1) | _BV(2));
 const uint16_t BUS_BAUD = 2400;
 const uint16_t RESPONSE_TIMEOUT_MS = 700;
 const uint8_t REQUEST_ATTEMPTS = 3;
@@ -88,6 +89,10 @@ bool readBusResponse(uint8_t node, char *response, size_t responseSize) {
   return false;
 }
 
+bool nodeIsActive(uint8_t node) {
+  return node >= FIRST_NODE && node <= LAST_NODE && (activeNodeMask & _BV(node)) != 0;
+}
+
 bool requestNode(uint8_t node, const char *command, char *response, size_t responseSize) {
   if (node < FIRST_NODE || node > LAST_NODE) return false;
   for (uint8_t attempt = 0; attempt < REQUEST_ATTEMPTS; ++attempt) {
@@ -124,6 +129,7 @@ bool setNodesMode(bool communication) {
   if (!communication) strcpy(modeCommand, "MODE FLASH");
   char response[RESPONSE_SIZE];
   for (uint8_t node = FIRST_NODE; node <= LAST_NODE; ++node) {
+    if (!nodeIsActive(node)) continue;
     if (!requestNode(node, modeCommand, response, sizeof(response))) {
       makeNodeError(node, response, sizeof(response));
       writeHostLine(response);
@@ -139,12 +145,12 @@ bool setNodesMode(bool communication) {
 void writeSystemModeResponse() {
   char result[RESPONSE_SIZE];
   if (selectedNode == 0) {
-    snprintf(result, sizeof(result), "OK MODE %s; NODES 1,2 MODE %s; SELECT NONE",
+    snprintf(result, sizeof(result), "OK MODE %s; NODES 1,2,3 MODE %s; SELECT NONE",
              communicationMode ? "COMM" : "FLASH",
              communicationMode ? "COMM" : "FLASH");
   } else {
     snprintf(result, sizeof(result),
-             "OK MODE %s; NODES 1,2 MODE %s; SELECT NODE %u",
+             "OK MODE %s; NODES 1,2,3 MODE %s; SELECT NODE %u",
              communicationMode ? "COMM" : "FLASH",
              communicationMode ? "COMM" : "FLASH",
              selectedNode);
@@ -181,17 +187,68 @@ void handleCommand(char *line) {
     return;
   }
 
+  if (strcmp(command, "RESTORE") == 0) {
+    if (strtok(NULL, " \t") != NULL) {
+      writeHostLine("ERR FORMAT");
+      return;
+    }
+    if (!setNodesMode(communicationMode)) return;
+    char response[RESPONSE_SIZE];
+    char selectCommand[12];
+    snprintf(selectCommand, sizeof(selectCommand), "SELECT %u", selectedNode);
+    for (uint8_t node = FIRST_NODE; node <= LAST_NODE; ++node) {
+      if (!nodeIsActive(node)) continue;
+      if (!requestNode(node, selectCommand, response, sizeof(response))) {
+        makeNodeError(node, response, sizeof(response));
+        writeHostLine(response);
+        return;
+      }
+    }
+    writeSystemModeResponse();
+    return;
+  }
+
+  if (strcmp(command, "DISCOVER") == 0) {
+    if (strtok(NULL, " \t") != NULL) {
+      writeHostLine("ERR FORMAT");
+      return;
+    }
+    char response[RESPONSE_SIZE];
+    activeNodeMask = 0;
+    char active[32] = "OK NODES";
+    size_t activeLength = strlen(active);
+    for (uint8_t node = FIRST_NODE; node <= LAST_NODE; ++node) {
+      if (requestNode(node, "PING", response, sizeof(response))) {
+        activeNodeMask |= _BV(node);
+        activeLength += snprintf(active + activeLength,
+                                 sizeof(active) - activeLength,
+                                 "%s%u", activeLength == 8 ? " " : ",", node);
+      }
+    }
+    if (activeNodeMask == 0) strcpy(active, "OK NODES NONE");
+    writeHostLine(active);
+    return;
+  }
+
   if (strcmp(command, "SELECT") == 0) {
     uint8_t selected;
     char *nodeText = strtok(NULL, " \t");
     if (!parseNode(nodeText, selected) || strtok(NULL, " \t") != NULL) {
-      writeHostLine("ERR SELECT USES NODE 1 OR 2");
+      writeHostLine("ERR SELECT USES NODE 1, 2, OR 3");
       return;
     }
     char response[RESPONSE_SIZE];
+    if (selected == 3 && !nodeIsActive(3)) {
+      if (!requestNode(3, "PING", response, sizeof(response))) {
+        writeHostLine("ERR NODE 3 NOT DETECTED");
+        return;
+      }
+      activeNodeMask |= _BV(3);
+    }
     char selectCommand[12];
     snprintf(selectCommand, sizeof(selectCommand), "SELECT %u", selected);
     for (uint8_t node = FIRST_NODE; node <= LAST_NODE; ++node) {
+      if (!nodeIsActive(node)) continue;
       if (!requestNode(node, selectCommand, response, sizeof(response))) {
         makeNodeError(node, response, sizeof(response));
         writeHostLine(response);
@@ -211,7 +268,7 @@ void handleCommand(char *line) {
   uint8_t node;
   char *nodeText = strtok(NULL, " \t");
   if (!parseNode(nodeText, node)) {
-    writeHostLine("ERR NODE USES 1 OR 2");
+    writeHostLine("ERR NODE USES 1, 2, OR 3");
     return;
   }
 

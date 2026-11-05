@@ -137,31 +137,40 @@ andruino-flash flash-platform --usb-device "$NANO_USB" attiny1614 \
 
 ### Uno control bus
 
-The optional Uno JTAG2UPDI build supports two addressed ATtiny1614 nodes on a
-half-duplex bus. After installing the modified Uno and node firmware, issue
+The optional Uno JTAG2UPDI build supports up to three addressed ATtiny1614
+nodes on a half-duplex bus. After installing the modified Uno and node firmware, issue
 commands through the Uno's explicit USB path:
 
 ```sh
 andruino-flash bus --usb-device "$UNO_USB" PING 1
 andruino-flash bus --usb-device "$UNO_USB" STATUS 2
 andruino-flash bus --usb-device "$UNO_USB" BLINK 2 200
+andruino-flash bus --usb-device "$UNO_USB" PING 3
 andruino-flash bus --usb-device "$UNO_USB" SELECT 1
 andruino-flash bus --usb-device "$UNO_USB" MODE COMM
 ```
 
-`MODE FLASH` and `MODE COMM` set the system-wide state on the Uno and both
-nodes. `SELECT 1` or `SELECT 2` sends the target ID to both nodes; each node
-records whether it is selected without changing either node's mode. These
+`MODE FLASH` and `MODE COMM` set the system-wide state on the Uno and every
+configured node. `SELECT 1`, `SELECT 2`, or
+`SELECT 3` sends the target ID to every configured node; each node records
+whether it is selected without changing its mode. These
 software states do **not** electrically isolate either UPDI pin or select the
 physical UPDI connection. Continue manually switching UPDI to the target being
-programmed. Enter system-wide `MODE FLASH`, use `SELECT 1` or `SELECT 2` to
-record the intended target at both nodes, and use `MODE COMM` to leave flashing
-mode. In FLASH mode the selected node's LED is solid ON and the other node's
-LED is OFF; in COMM mode both nodes retain their configured blink behavior.
+programmed. Enter system-wide `MODE FLASH`, use `SELECT 1`, `SELECT 2`, or
+`SELECT 3` to record the intended target at every node, and use `MODE COMM` to
+leave flashing mode. In FLASH mode the selected node's LED is solid ON and
+the other nodes' LEDs are OFF; in COMM mode each node retains its configured
+blink behavior.
 For LEDs wired from VDD through a resistor to PA5, the output is active-low:
 PA5 LOW lights the LED and PA5 HIGH turns it off.
+On the standard 14-pin ATtiny1614 package, the bus uses PB3/PB2 (physical
+pins 6/7), and the active-low LED output uses PA5 (physical pin 3). PB0
+(physical pin 9) is the inverted electrical level of PA5 only in FLASH mode:
+PB0 is HIGH while PA5 is LOW (LED lit), and PB0 is LOW while PA5 is HIGH (LED off).
+Use PB0 only as a logic signal for a
+high-impedance input, not directly on the UPDI bus.
 Mode and selection state persist across resets in EEPROM. See the
-[control-bus wiring and complete command reference](docs/REPRODUCING.md#8-uno-control-bus-for-two-attiny1614-nodes).
+[control-bus wiring and complete command reference](docs/REPRODUCING.md#8-uno-control-bus-for-up-to-three-attiny1614-nodes).
 
 The Uno profile uses the Arduino bootloader at 115200 baud. The Nano profile
 uses the old bootloader at 57600 baud. The ATtiny1614 profile uses JTAG2UPDI at

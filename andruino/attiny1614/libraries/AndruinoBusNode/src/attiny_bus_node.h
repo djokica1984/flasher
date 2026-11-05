@@ -8,17 +8,18 @@
 #include <string.h>
 
 #ifndef NODE_ADDRESS
-#error "Define NODE_ADDRESS as 1 or 2 in the sketch"
+#error "Define NODE_ADDRESS as 1, 2, or 3 in the sketch"
 #endif
 
-#if NODE_ADDRESS < 1 || NODE_ADDRESS > 2
-#error "NODE_ADDRESS must be 1 or 2"
+#if NODE_ADDRESS < 1 || NODE_ADDRESS > 3
+#error "NODE_ADDRESS must be 1, 2, or 3"
 #endif
 
 namespace {
 const uint16_t LINK_BAUD = 2400;
 const uint16_t BUS_TURNAROUND_MS = 10;
 const uint16_t ALLOWED_BLINK_INTERVALS[] = {200, 1000};
+const uint8_t FLASH_SELECT_PIN = PIN_PB0;
 const uint8_t EEPROM_MODE_ADDRESS = 0;
 const uint8_t EEPROM_SELECTED_ADDRESS = 1;
 const uint8_t EEPROM_MAGIC_ADDRESS = 2;
@@ -37,6 +38,14 @@ void setNodeLed(bool on) {
 
 bool nodeLedOn() {
   return nodeMode == NODE_FLASH ? selectedNode == NODE_ADDRESS : ledOn;
+}
+
+void updateFlashSelectPin() {
+  if (nodeMode != NODE_FLASH) {
+    digitalWrite(FLASH_SELECT_PIN, HIGH);
+    return;
+  }
+  digitalWrite(FLASH_SELECT_PIN, ledOn ? HIGH : LOW);
 }
 
 void releaseBus() {
@@ -103,7 +112,7 @@ void handleBusCommand(char *line) {
     return;
   }
   if (strcmp(command, "VERSION") == 0 && strtok(NULL, " \t") == NULL) {
-    sendResponse(F("VERSION ANDRUINO-ATTINY1614-BUS-2"));
+    sendResponse(F("VERSION ANDRUINO-ATTINY1614-BUS-5"));
     return;
   }
   if (strcmp(command, "STATUS") == 0 && strtok(NULL, " \t") == NULL) {
@@ -118,6 +127,7 @@ void handleBusCommand(char *line) {
       EEPROM.update(EEPROM_MAGIC_ADDRESS, EEPROM_MAGIC);
       ledOn = false;
       setNodeLed(false);
+      updateFlashSelectPin();
       lastBlinkAt = millis();
       sendResponse(F("MODE COMM"));
       return;
@@ -126,8 +136,9 @@ void handleBusCommand(char *line) {
       nodeMode = NODE_FLASH;
       EEPROM.update(EEPROM_MODE_ADDRESS, nodeMode);
       EEPROM.update(EEPROM_MAGIC_ADDRESS, EEPROM_MAGIC);
-      ledOn = false;
-      setNodeLed(false);
+      ledOn = selectedNode == NODE_ADDRESS;
+      setNodeLed(ledOn);
+      updateFlashSelectPin();
       sendResponse(F("MODE FLASH"));
       return;
     }
@@ -136,9 +147,9 @@ void handleBusCommand(char *line) {
     char *selectedText = strtok(NULL, " \t");
     char *end = NULL;
     const long requested = selectedText == NULL ? -1 : strtol(selectedText, &end, 10);
-    if (selectedText == NULL || *end != '\0' || requested < 1 || requested > 2 ||
+    if (selectedText == NULL || *end != '\0' || requested < 0 || requested > 3 ||
         strtok(NULL, " \t") != NULL) {
-      sendResponse(F("ERR SELECT USES NODE 1 OR 2"));
+      sendResponse(F("ERR SELECT USES NODE 0, 1, 2, OR 3"));
       return;
     }
     selectedNode = (uint8_t)requested;
@@ -148,6 +159,7 @@ void handleBusCommand(char *line) {
       ledOn = selectedNode == NODE_ADDRESS;
       setNodeLed(ledOn);
     }
+    updateFlashSelectPin();
     sendResponse(selectedNode == NODE_ADDRESS ? F("SELECTED") : F("NOT SELECTED"));
     return;
   }
@@ -178,6 +190,7 @@ void updateBlink() {
   if (nodeMode == NODE_FLASH) {
     ledOn = selectedNode == NODE_ADDRESS;
     setNodeLed(ledOn);
+    updateFlashSelectPin();
     return;
   }
   const uint32_t now = millis();
@@ -193,7 +206,7 @@ void setup() {
   if (EEPROM.read(EEPROM_MAGIC_ADDRESS) == EEPROM_MAGIC) {
     const uint8_t storedMode = EEPROM.read(EEPROM_MODE_ADDRESS);
     const uint8_t storedSelection = EEPROM.read(EEPROM_SELECTED_ADDRESS);
-    if (storedMode <= NODE_FLASH && storedSelection <= 2) {
+    if (storedMode <= NODE_FLASH && storedSelection <= 3) {
       nodeMode = (NodeMode)storedMode;
       selectedNode = storedSelection;
     }
@@ -203,8 +216,10 @@ void setup() {
     EEPROM.update(EEPROM_MAGIC_ADDRESS, EEPROM_MAGIC);
   }
   pinMode(PIN_PA5, OUTPUT);
+  pinMode(FLASH_SELECT_PIN, OUTPUT);
   ledOn = nodeMode == NODE_FLASH && selectedNode == NODE_ADDRESS;
   setNodeLed(ledOn);
+  updateFlashSelectPin();
   Serial.begin(LINK_BAUD);
   releaseBus();
   lastBlinkAt = millis();

@@ -7,7 +7,7 @@ request_id="cli-$(date +%s)-$$-$RANDOM"
 result_dir="${ANDRUINO_RESULT_DIR:-/storage/emulated/0/Download/AndruinoFlash}"
 result_file="$result_dir/$request_id.log"
 sketch_root="${ANDRUINO_SKETCH_ROOT:-/storage/emulated/0/Download/andruino}"
-usage="Usage: andruino-flash devices | bus --usb-device PATH PING|STATUS|VERSION NODE | BLINK NODE 200|1000 | SELECT NODE | MODE COMM|FLASH | build [--platform uno|nano|attiny1614] [SKETCH_DIR_OR_INO...] | flash-sketch [--platform uno|nano|attiny1614] [--usb-device PATH] SKETCH_DIR_OR_INO | flash-platform [--usb-device PATH] uno|nano|attiny1614 HEX | signature [--usb-device PATH] | flash [--usb-device PATH] HEX | run [--usb-device PATH] -- AVRDUDE_OPTIONS..."
+usage="Usage: andruino-flash startup [--mode COMM|FLASH] | devices | bus --usb-device PATH PING|STATUS|VERSION NODE | BLINK NODE 200|1000 | SELECT NODE | DISCOVER | MODE COMM|FLASH | build [--platform uno|nano|attiny1614] [SKETCH_DIR_OR_INO...] | flash-sketch [--platform uno|nano|attiny1614] [--usb-device PATH] SKETCH_DIR_OR_INO | flash-platform [--usb-device PATH] uno|nano|attiny1614 HEX | signature [--usb-device PATH] | flash [--usb-device PATH] HEX | run [--usb-device PATH] -- AVRDUDE_OPTIONS..."
 usb_device_path=""
 service_action="run"
 avrdude_args=()
@@ -166,11 +166,78 @@ run_avrdude() {
     fi
 }
 
+new_request_context() {
+    request_id="cli-$(date +%s)-$$-$RANDOM"
+    result_file="$result_dir/$request_id.log"
+}
+
+startup_system() {
+    local startup_mode="COMM"
+    if [[ "${1:-}" == "--mode" ]]; then
+        if [[ "$#" -ne 2 ]]; then
+            echo "--mode requires COMM or FLASH" >&2
+            return 2
+        fi
+        startup_mode="${2^^}"
+        if [[ "$startup_mode" != "COMM" && "$startup_mode" != "FLASH" ]]; then
+            echo "Unsupported startup mode '$2'; use COMM or FLASH" >&2
+            return 2
+        fi
+    elif [[ "$#" -ne 0 ]]; then
+        echo "Usage: andruino-flash startup [--mode COMM|FLASH]" >&2
+        return 2
+    fi
+
+    new_request_context
+    service_action="devices"
+    usb_device_path=""
+    run_avrdude
+
+    mapfile -t uno_paths < <(awk '
+        /USB_DEVICE path=/ && tolower($0) ~ /vid=1a86/ && tolower($0) ~ /pid=7523/ {
+            for (i = 1; i <= NF; ++i) if ($i ~ /^path=/) { sub(/^path=/, "", $i); print $i }
+        }
+    ' "$result_file")
+    if [[ "${#uno_paths[@]}" -eq 0 ]]; then
+        echo "No supported Uno USB serial device was discovered (expected VID 1a86/PID 7523)" >&2
+        return 1
+    fi
+    if [[ "${#uno_paths[@]}" -gt 1 ]]; then
+        echo "Multiple Uno USB serial devices were discovered: ${uno_paths[*]}" >&2
+        echo "Disconnect all but the Uno, or use the existing bus --usb-device PATH commands" >&2
+        return 1
+    fi
+
+    usb_device_path="${uno_paths[0]}"
+    new_request_context
+    service_action="bus"
+    bus_command="DISCOVER"
+    run_avrdude
+
+    new_request_context
+    bus_command="MODE $startup_mode"
+    run_avrdude
+}
+
 flash_platform() {
     local platform="$1"
     local firmware="$2"
     if [[ ! -f "$firmware" ]]; then
         echo "Firmware file does not exist: $firmware" >&2
+        return 2
+    fi
+    if [[ "$firmware" != *.hex ]]; then
+        echo "flash-platform requires an Intel HEX file (*.hex), not: $firmware" >&2
+        echo "Use flash-sketch to build and flash a sketch, or pass the generated .ino.hex file." >&2
+        return 2
+    fi
+    if [[ "$platform" == "uno" && "$firmware" == *"/attiny1614/"* ]]; then
+        echo "Refusing unsafe firmware selection: an ATtiny1614 HEX cannot be flashed to the Uno." >&2
+        echo "For the Uno use the jtag2updi/jtag2updi.ino.hex firmware, then relaunch the JTAG2UPDI control bus." >&2
+        return 2
+    fi
+    if [[ "$platform" == "attiny1614" && "$firmware" == *"/uno/"* ]]; then
+        echo "Refusing unsafe firmware selection: a Uno HEX must be flashed with platform uno." >&2
         return 2
     fi
     case "$platform" in
@@ -192,21 +259,27 @@ flash_platform() {
 }
 
 case "$action" in
+    startup|start)
+        shift
+        startup_system "$@"
+        exit $?;
+        ;;
     bus)
         shift
-        if [[ "${1:-}" != "--usb-device" || "$#" -lt 4 || -z "$2" ]]; then
+        if [[ "${1:-}" != "--usb-device" || "$#" -lt 3 || -z "$2" ]]; then
             echo "$usage" >&2
             exit 2
         fi
         usb_device_path="$2"
         shift 2
         bus_command="$(printf '%s' "$*" | tr '[:lower:]' '[:upper:]')"
-        if [[ ! "$bus_command" =~ ^(PING|STATUS|VERSION)[[:space:]]+[12]$ &&
-              ! "$bus_command" =~ ^BLINK[[:space:]]+[12][[:space:]]+(200|1000)$ &&
+        if [[ ! "$bus_command" =~ ^(PING|STATUS|VERSION)[[:space:]]+[123]$ &&
+              ! "$bus_command" =~ ^BLINK[[:space:]]+[123][[:space:]]+(200|1000)$ &&
               ! "$bus_command" =~ ^MODE[[:space:]]+(COMM|FLASH)$ &&
-              ! "$bus_command" =~ ^SELECT[[:space:]]+[12]$ ]]; then
+              ! "$bus_command" =~ ^SELECT[[:space:]]+[123]$ &&
+              ! "$bus_command" =~ ^DISCOVER$ ]]; then
             echo "Invalid bus command: $bus_command" >&2
-            echo "Use PING, STATUS, VERSION <1|2>, BLINK <1|2> <200|1000>, SELECT <1|2>, or MODE <COMM|FLASH>." >&2
+            echo "Use PING, STATUS, VERSION <1|2|3>, BLINK <1|2|3> <200|1000>, SELECT <1|2|3>, DISCOVER, or MODE <COMM|FLASH>." >&2
             exit 2
         fi
         service_action="bus"
