@@ -2,7 +2,7 @@
 
 This document describes the complete tested architecture and the source layout needed to recreate the Uno/JTAG2UPDI control-bus system and the ATtiny1614 sketches from scratch.
 
-> Current limitation: this describes the exact software baseline, wiring model, and build procedure. At the time of writing, Node 1 is confirmed to answer bidirectional control-bus commands; Node 2 does not consistently answer discovery. The software should therefore be regenerated exactly before treating a Node 2 no-response result as proof that the source is wrong.
+> Verified state: Nodes 1 through 7 use the same address library and were rebuilt with the seven-node control-bus implementation. All seven nodes returned `PONG` in the final all-node verification. Reproduce the system from this source before diagnosing a no-response node.
 
 ## 1. System components
 
@@ -23,7 +23,7 @@ The system has three independent communication layers:
 3. **ATtiny1614 node firmware**
    - Node firmware listens for addressed text commands on PB3/RX.
    - It transmits responses from PB2/TX.
-   - Logical address 1, 2, or 3 is compiled into each node image.
+   - Logical address 1 through 7 is compiled into each node image.
    - PB0 reports the selected/LED flash state through a separate output. The LED is PA5, physical pin 3.
 
 ### Repository layout
@@ -122,7 +122,7 @@ Use the repository's complete `andruino/uno/jtag2updi` directory. Do not replace
 ```cpp
 const uint8_t BUS_PIN = 5;
 const uint8_t FIRST_NODE = 1;
-const uint8_t LAST_NODE = 3;
+const uint8_t LAST_NODE = 7;
 const uint16_t BUS_BAUD = 2400;
 const uint16_t RESPONSE_TIMEOUT_MS = 700;
 const uint8_t REQUEST_ATTEMPTS = 3;
