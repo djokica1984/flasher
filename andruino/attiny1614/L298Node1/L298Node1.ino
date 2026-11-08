@@ -29,6 +29,9 @@ uint16_t motorRunDuration = 0;
 uint32_t motorStartedAt = 0;
 uint16_t lastRawAngle = 0;
 int32_t encoderPosition = 0;
+uint16_t blinkIntervalMs = 1000;
+uint32_t lastBlinkAt = 0;
+bool statusLedOn = false;
 
 void releaseBus() { USART0.CTRLB &= (uint8_t)~USART_TXEN_bm; pinMode(BUS_TX_PIN, INPUT); }
 void startTransmit() { digitalWrite(BUS_TX_PIN, HIGH); pinMode(BUS_TX_PIN, OUTPUT); USART0.CTRLB |= USART_TXEN_bm; }
@@ -79,6 +82,23 @@ bool parseDuration(const char *text, uint16_t &value) {
   if (*text || parsed == 0) return false; value = (uint16_t)parsed; return true;
 }
 
+bool parseBlinkInterval(const char *text, uint16_t &value) {
+  if (!text || !*text) return false;
+  uint32_t parsed = 0;
+  while (*text >= '0' && *text <= '9') { parsed = parsed * 10 + (*text++ - '0'); if (parsed > 60000) return false; }
+  if (*text || parsed < 50) return false;
+  value = (uint16_t)parsed;
+  return true;
+}
+
+void updateStatusLed() {
+  if (millis() - lastBlinkAt >= blinkIntervalMs) {
+    lastBlinkAt = millis();
+    statusLedOn = !statusLedOn;
+    digitalWrite(STATUS_LED_PIN, statusLedOn ? LOW : HIGH);
+  }
+}
+
 void handleCommand(char *line) {
   char *command = strtok(line, " \t"); char *argument = strtok(NULL, " \t");
   if (!strcmp(command, "PING") && !argument) { responseHeader(F("PONG")); finishResponse(); return; }
@@ -89,6 +109,17 @@ void handleCommand(char *line) {
     responseHeader(F("UPDI ")); Serial.print(!strcmp(argument, "ENABLE") ? F("ENABLED") : F("DISABLED")); finishResponse(); return;
   }
   if (!strcmp(command, "STOP") && !argument) { stopAll(); responseHeader(F("STOPPED")); finishResponse(); return; }
+  if (!strcmp(command, "BLINK") && argument) {
+    uint16_t interval;
+    char *tail = strtok(NULL, " \t");
+    if (parseBlinkInterval(argument, interval) && tail == NULL) {
+      blinkIntervalMs = interval;
+      lastBlinkAt = millis();
+      statusLedOn = false;
+      digitalWrite(STATUS_LED_PIN, HIGH);
+      responseHeader(F("BLINK ")); Serial.print(blinkIntervalMs); finishResponse(); return;
+    }
+  }
   if (!strcmp(command, "VALVE") && argument && !strtok(NULL, " \t") && (!strcmp(argument, "ON") || !strcmp(argument, "OFF"))) {
     setValve(!strcmp(argument, "ON")); responseHeader(F("VALVE ")); Serial.print(valveOn ? F("ON") : F("OFF")); finishResponse(); return;
   }
@@ -127,10 +158,12 @@ void setup() {
   digitalWrite(DRV8871_IN1_PIN, LOW); digitalWrite(DRV8871_IN2_PIN, LOW); digitalWrite(DRV8871_SLEEP_PIN, LOW);
   Wire.begin(); Serial.begin(LINK_BAUD); releaseBus();
   encoderAvailable = readAs5600RawAngle(lastRawAngle); encoderPosition = 0;
+  lastBlinkAt = millis();
 }
 void loop() {
   static char line[48]; static uint8_t length = 0; static bool overflow = false;
   if (motorDirection != MOTOR_OFF && motorRunDuration != 0 && millis() - motorStartedAt >= motorRunDuration) stopMotor();
+  updateStatusLed();
   updateEncoder();
   while (Serial.available()) {
     char character = Serial.read();

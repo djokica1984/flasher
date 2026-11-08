@@ -7,7 +7,7 @@ request_id="cli-$(date +%s)-$$-$RANDOM"
 result_dir="${ANDRUINO_RESULT_DIR:-/storage/emulated/0/Download/AndruinoFlash}"
 result_file="$result_dir/$request_id.log"
 sketch_root="${ANDRUINO_SKETCH_ROOT:-/storage/emulated/0/Download/andruino}"
-usage="Usage: andruino-flash startup [--mode COMM|FLASH] | devices | bus --usb-device PATH PING|STATUS|VERSION NODE | BLINK NODE 200|1000 | SELECT NODE | DISCOVER | MODE COMM|FLASH | UPDI ENABLE|DISABLE NODE | build [--platform uno|nano|attiny1614] [SKETCH_DIR_OR_INO...] | flash-sketch [--platform uno|nano|attiny1614] [--usb-device PATH] SKETCH_DIR_OR_INO | flash-platform [--usb-device PATH] uno|nano|attiny1614 HEX | signature [--usb-device PATH] | flash [--usb-device PATH] HEX | run [--usb-device PATH] -- AVRDUDE_OPTIONS..."
+usage="Usage: andruino-flash startup [--mode COMM|FLASH] | devices | bus --usb-device PATH PING|STATUS|VERSION NODE | BLINK NODE 50..60000 | SELECT NODE | DISCOVER | MODE COMM|FLASH | UPDI ENABLE|DISABLE NODE | build [--platform uno|nano|attiny1614] [SKETCH_DIR_OR_INO...] | flash-sketch [--platform uno|nano|attiny1614] [--usb-device PATH] SKETCH_DIR_OR_INO | flash-platform [--usb-device PATH] uno|nano|attiny1614 HEX | signature [--usb-device PATH] | flash [--usb-device PATH] HEX | run [--usb-device PATH] -- AVRDUDE_OPTIONS..."
 usb_device_path=""
 service_action="run"
 avrdude_args=()
@@ -277,7 +277,7 @@ case "$action" in
         shift 2
         bus_command="$(printf '%s' "$*" | tr '[:lower:]' '[:upper:]')"
         if [[ ! "$bus_command" =~ ^(PING|STATUS|VERSION|STOP|READ_ENCODER|RESET_ENCODER|MOTION_STATUS|ANGLE)[[:space:]]+[123]$ &&
-              ! "$bus_command" =~ ^BLINK[[:space:]]+[123][[:space:]]+(200|1000)$ &&
+              ! "$bus_command" =~ ^BLINK[[:space:]]+[123][[:space:]]+([0-9]+)$ &&
               ! "$bus_command" =~ ^MODE[[:space:]]+(COMM|FLASH)$ &&
               ! "$bus_command" =~ ^SELECT[[:space:]]+[123]$ &&
               ! "$bus_command" =~ ^DISCOVER$ &&

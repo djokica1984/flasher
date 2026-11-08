@@ -305,10 +305,11 @@ void handleCommand(char *line) {
     strcpy(forwardedCommand, command);
   } else if (strcmp(command, "BLINK") == 0) {
     char *interval = strtok(NULL, " \t");
-    if (interval == NULL ||
-        (strcmp(interval, "200") != 0 && strcmp(interval, "1000") != 0) ||
-        strtok(NULL, " \t") != NULL) {
-      writeHostLine("ERR BLINK USES 200 OR 1000");
+    char *tail = strtok(NULL, " \t");
+    char *end = NULL;
+    const long blinkMs = interval == NULL ? -1 : strtol(interval, &end, 10);
+    if (interval == NULL || *end != '\0' || blinkMs < 50 || blinkMs > 60000 || tail != NULL) {
+      writeHostLine("ERR BLINK USES 50..60000 MS");
       return;
     }
     snprintf(forwardedCommand, sizeof(forwardedCommand), "BLINK %s", interval);

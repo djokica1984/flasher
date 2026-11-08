@@ -18,7 +18,6 @@
 namespace {
 const uint16_t LINK_BAUD = 2400;
 const uint16_t BUS_TURNAROUND_MS = 10;
-const uint16_t ALLOWED_BLINK_INTERVALS[] = {200, 1000};
 const uint8_t FLASH_SELECT_PIN = PIN_PB0;
 const uint8_t EEPROM_MODE_ADDRESS = 0;
 const uint8_t EEPROM_SELECTED_ADDRESS = 1;
@@ -81,13 +80,9 @@ bool parseBlinkInterval(const char *text, uint16_t &interval) {
   char *end = NULL;
   const long parsed = strtol(text, &end, 10);
   if (*end != '\0') return false;
-  for (uint8_t i = 0; i < sizeof(ALLOWED_BLINK_INTERVALS) / sizeof(ALLOWED_BLINK_INTERVALS[0]); ++i) {
-    if (parsed == ALLOWED_BLINK_INTERVALS[i]) {
-      interval = (uint16_t)parsed;
-      return true;
-    }
-  }
-  return false;
+  if (parsed < 50 || parsed > 60000) return false;
+  interval = (uint16_t)parsed;
+  return true;
 }
 
 void stopVirtualMotor() {
