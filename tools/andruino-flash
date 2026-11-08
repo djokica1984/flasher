@@ -278,6 +278,7 @@ case "$action" in
         bus_command="$(printf '%s' "$*" | tr '[:lower:]' '[:upper:]')"
         if [[ ! "$bus_command" =~ ^(PING|STATUS|VERSION|STOP|READ_ENCODER|RESET_ENCODER|MOTION_STATUS|ANGLE)[[:space:]]+[1-7]$ &&
               ! "$bus_command" =~ ^BLINK[[:space:]]+[1-7][[:space:]]+([0-9]+)$ &&
+              ! "$bus_command" =~ ^LED[[:space:]]+[1-7][[:space:]]+(ON|OFF)$ &&
               ! "$bus_command" =~ ^MODE[[:space:]]+(COMM|FLASH)$ &&
               ! "$bus_command" =~ ^SELECT[[:space:]]+[1-7]$ &&
               ! "$bus_command" =~ ^DISCOVER$ &&

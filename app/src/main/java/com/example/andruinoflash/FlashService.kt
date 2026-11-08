@@ -153,7 +153,7 @@ class FlashService : Service() {
     ) {
         if (!BUS_COMMAND_PATTERN.matches(command)) {
             throw IllegalArgumentException(
-                "Unsupported bus command. Use PING, STATUS, VERSION, STOP, BLINK, VALVE, MOTOR, MODE, or SELECT syntax."
+                "Unsupported bus command. Use PING, STATUS, VERSION, STOP, BLINK, LED, VALVE, MOTOR, MODE, or SELECT syntax."
             )
         }
         val usbManager = getSystemService(USB_SERVICE) as UsbManager
@@ -645,7 +645,7 @@ class FlashService : Service() {
         private const val JTAG2UPDI_SETTLE_MS = 1200L
         private const val MAX_CONTROL_RESPONSE_LENGTH = 120
         private val BUS_COMMAND_PATTERN = Regex(
-            "(?i)(PING|STATUS|VERSION|STOP|READ_ENCODER|RESET_ENCODER|MOTION_STATUS|ANGLE) [1-7]|BLINK [1-7] [0-9]{2,5}|MODE (COMM|FLASH)|SELECT [1-7]|DISCOVER|UPDI (ENABLE|DISABLE) [1-7]|VALVE [1-7] (ON|OFF)|MOTOR [1-7] OFF|MOTOR [1-7] (FORWARD|REVERSE) ([1-9][0-9]{0,4})"
+            "(?i)(PING|STATUS|VERSION|STOP|READ_ENCODER|RESET_ENCODER|MOTION_STATUS|ANGLE) [1-7]|BLINK [1-7] [0-9]{2,5}|LED [1-7] (ON|OFF)|MODE (COMM|FLASH)|SELECT [1-7]|DISCOVER|UPDI (ENABLE|DISABLE) [1-7]|VALVE [1-7] (ON|OFF)|MOTOR [1-7] OFF|MOTOR [1-7] (FORWARD|REVERSE) ([1-9][0-9]{0,4})"
         )
         private const val MAX_ENCODED_ARGS_LENGTH = 100_000
         private const val MAX_AVRDUDE_ARGUMENTS = 256

@@ -303,6 +303,15 @@ void handleCommand(char *line) {
       return;
     }
     strcpy(forwardedCommand, command);
+  } else if (strcmp(command, "LED") == 0) {
+    char *state = strtok(NULL, " \t");
+    char *tail = strtok(NULL, " \t");
+    if (state != NULL && tail == NULL && (strcmp(state, "ON") == 0 || strcmp(state, "OFF") == 0)) {
+      snprintf(forwardedCommand, sizeof(forwardedCommand), "LED %s", state);
+    } else {
+      writeHostLine("ERR LED USES ON|OFF");
+      return;
+    }
   } else if (strcmp(command, "BLINK") == 0) {
     char *interval = strtok(NULL, " \t");
     char *tail = strtok(NULL, " \t");

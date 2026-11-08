@@ -30,6 +30,7 @@ uint8_t selectedNode = 0;
 uint16_t blinkIntervalMs = 1000;
 uint32_t lastBlinkAt = 0;
 bool ledOn = false;
+bool ledBlinking = true;
 bool valveOn = false;
 bool motorForward = false;
 bool motorReverse = false;
@@ -149,6 +150,7 @@ void handleBusCommand(char *line) {
       EEPROM.update(EEPROM_MODE_ADDRESS, nodeMode);
       EEPROM.update(EEPROM_MAGIC_ADDRESS, EEPROM_MAGIC);
       ledOn = false;
+      ledBlinking = true;
       setNodeLed(false);
       updateFlashSelectPin();
       lastBlinkAt = millis();
@@ -247,6 +249,17 @@ void handleBusCommand(char *line) {
     else sendResponse(F("ENCODER -999999"));
     return;
   }
+  if (strcmp(command, "LED") == 0 && nodeMode == NODE_COMM) {
+    char *state = strtok(NULL, " \t");
+    if (state != NULL && strtok(NULL, " \t") == NULL &&
+        (strcmp(state, "ON") == 0 || strcmp(state, "OFF") == 0)) {
+      ledBlinking = false;
+      ledOn = strcmp(state, "ON") == 0;
+      setNodeLed(ledOn);
+      sendResponse(ledOn ? F("LED ON") : F("LED OFF"));
+      return;
+    }
+  }
   if (strcmp(command, "BLINK") == 0) {
     uint16_t requestedInterval;
     if (nodeMode == NODE_COMM &&
@@ -254,6 +267,7 @@ void handleBusCommand(char *line) {
         strtok(NULL, " \t") == NULL) {
       blinkIntervalMs = requestedInterval;
       lastBlinkAt = millis();
+      ledBlinking = true;
       ledOn = false;
       setNodeLed(false);
       delay(BUS_TURNAROUND_MS);
@@ -277,6 +291,7 @@ void updateBlink() {
     updateFlashSelectPin();
     return;
   }
+  if (!ledBlinking) return;
   const uint32_t now = millis();
   if (now - lastBlinkAt >= blinkIntervalMs) {
     lastBlinkAt = now;
