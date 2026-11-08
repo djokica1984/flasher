@@ -288,7 +288,7 @@ void handleCommand(char *line) {
   uint8_t node;
   char *nodeText = strtok(NULL, " \t");
   if (!parseNode(nodeText, node)) {
-    writeHostLine("ERR NODE USES 1, 2, OR 3");
+    writeHostLine("ERR NODE USES 1 THROUGH 7");
     return;
   }
 
