@@ -86,7 +86,28 @@ void sendBusCommand(uint8_t node, const char *command) {
   releaseBus();
 }
 
-bool readBusResponse(uint8_t node, char *response, size_t responseSize) {
+bool responseMatchesCommand(uint8_t node, const char *command, const char *response) {
+  if (strncmp(command, "PING", 4) == 0) {
+    char expected[16];
+    snprintf(expected, sizeof(expected), "NODE %u PONG", node);
+    return strcmp(response, expected) == 0;
+  }
+  if (strncmp(command, "BLINK ", 6) == 0) {
+    char expected[24];
+    snprintf(expected, sizeof(expected), "NODE %u BLINK %s", node, command + 6);
+    return strcmp(response, expected) == 0;
+  }
+  if (strncmp(command, "LED ", 4) == 0) {
+    char expected[24];
+    snprintf(expected, sizeof(expected), "NODE %u LED %s", node, command + 4);
+    return strcmp(response, expected) == 0;
+  }
+  char prefix[12];
+  snprintf(prefix, sizeof(prefix), "NODE %u ", node);
+  return strncmp(response, prefix, strlen(prefix)) == 0;
+}
+
+bool readBusResponse(uint8_t node, const char *command, char *response, size_t responseSize) {
   size_t length = 0;
   const uint32_t deadline = millis() + RESPONSE_TIMEOUT_MS;
   while ((int32_t)(millis() - deadline) < 0) {
@@ -95,9 +116,7 @@ bool readBusResponse(uint8_t node, char *response, size_t responseSize) {
       if (character == '\r') continue;
       if (character == '\n') {
         response[length] = '\0';
-        char expected[12];
-        snprintf(expected, sizeof(expected), "NODE %u ", node);
-        if (strncmp(response, expected, strlen(expected)) == 0) return true;
+        if (responseMatchesCommand(node, command, response)) return true;
         length = 0;
         continue;
       }
@@ -121,7 +140,7 @@ bool requestNode(uint8_t node, const char *command, char *response, size_t respo
   for (uint8_t attempt = 0; attempt < REQUEST_ATTEMPTS; ++attempt) {
     while (busSerial.available()) busSerial.read();
     sendBusCommand(node, command);
-    if (readBusResponse(node, response, responseSize)) return true;
+    if (readBusResponse(node, command, response, responseSize)) return true;
     if (attempt + 1 < REQUEST_ATTEMPTS) delay(RETRY_DELAY_MS);
   }
   return false;
