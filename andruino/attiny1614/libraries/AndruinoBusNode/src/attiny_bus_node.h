@@ -8,11 +8,11 @@
 #include <string.h>
 
 #ifndef NODE_ADDRESS
-#error "Define NODE_ADDRESS as 1, 2, or 3 in the sketch"
+#error "Define NODE_ADDRESS as 1 through 7 in the sketch"
 #endif
 
-#if NODE_ADDRESS < 1 || NODE_ADDRESS > 3
-#error "NODE_ADDRESS must be 1, 2, or 3"
+#if NODE_ADDRESS < 1 || NODE_ADDRESS > 7
+#error "NODE_ADDRESS must be 1 through 7"
 #endif
 
 namespace {
@@ -170,9 +170,9 @@ void handleBusCommand(char *line) {
     char *selectedText = strtok(NULL, " \t");
     char *end = NULL;
     const long requested = selectedText == NULL ? -1 : strtol(selectedText, &end, 10);
-    if (selectedText == NULL || *end != '\0' || requested < 0 || requested > 3 ||
+    if (selectedText == NULL || *end != '\0' || requested < 0 || requested > 7 ||
         strtok(NULL, " \t") != NULL) {
-      sendResponse(F("ERR SELECT USES NODE 0, 1, 2, OR 3"));
+      sendResponse(F("ERR SELECT USES NODE 0 THROUGH 7"));
       return;
     }
     selectedNode = (uint8_t)requested;

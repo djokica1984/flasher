@@ -276,15 +276,15 @@ case "$action" in
         usb_device_path="$2"
         shift 2
         bus_command="$(printf '%s' "$*" | tr '[:lower:]' '[:upper:]')"
-        if [[ ! "$bus_command" =~ ^(PING|STATUS|VERSION|STOP|READ_ENCODER|RESET_ENCODER|MOTION_STATUS|ANGLE)[[:space:]]+[123]$ &&
-              ! "$bus_command" =~ ^BLINK[[:space:]]+[123][[:space:]]+([0-9]+)$ &&
+        if [[ ! "$bus_command" =~ ^(PING|STATUS|VERSION|STOP|READ_ENCODER|RESET_ENCODER|MOTION_STATUS|ANGLE)[[:space:]]+[1-7]$ &&
+              ! "$bus_command" =~ ^BLINK[[:space:]]+[1-7][[:space:]]+([0-9]+)$ &&
               ! "$bus_command" =~ ^MODE[[:space:]]+(COMM|FLASH)$ &&
-              ! "$bus_command" =~ ^SELECT[[:space:]]+[123]$ &&
+              ! "$bus_command" =~ ^SELECT[[:space:]]+[1-7]$ &&
               ! "$bus_command" =~ ^DISCOVER$ &&
-              ! "$bus_command" =~ ^UPDI[[:space:]]+(ENABLE|DISABLE)[[:space:]]+[123]$ &&
-              ! "$bus_command" =~ ^VALVE[[:space:]]+[123][[:space:]]+(ON|OFF)$ &&
-              ! "$bus_command" =~ ^MOTOR[[:space:]]+[123][[:space:]]+OFF$ &&
-              ! "$bus_command" =~ ^MOTOR[[:space:]]+[123][[:space:]]+(FORWARD|REVERSE)[[:space:]]+[1-9][0-9]*$ ]]; then
+              ! "$bus_command" =~ ^UPDI[[:space:]]+(ENABLE|DISABLE)[[:space:]]+[1-7]$ &&
+              ! "$bus_command" =~ ^VALVE[[:space:]]+[1-7][[:space:]]+(ON|OFF)$ &&
+              ! "$bus_command" =~ ^MOTOR[[:space:]]+[1-7][[:space:]]+OFF$ &&
+              ! "$bus_command" =~ ^MOTOR[[:space:]]+[1-7][[:space:]]+(FORWARD|REVERSE)[[:space:]]+[1-9][0-9]*$ ]]; then
             echo "Invalid bus command: $bus_command" >&2
             echo "Use PING|STATUS|VERSION|STOP|... <node>, BLINK <node> <200|1000>, VALVE <node> ON|OFF, or MOTOR <node> OFF|FORWARD|REVERSE [ms]." >&2
             exit 2

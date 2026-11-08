@@ -13,8 +13,8 @@
 namespace {
 const uint8_t BUS_PIN = 5;
 const uint8_t FIRST_NODE = 1;
-const uint8_t LAST_NODE = 3;
-uint8_t activeNodeMask = (_BV(1) | _BV(2));
+const uint8_t LAST_NODE = 7;
+uint8_t activeNodeMask = (_BV(1) | _BV(2) | _BV(3) | _BV(4) | _BV(5) | _BV(6) | _BV(7));
 const uint16_t BUS_BAUD = 2400;
 const uint16_t RESPONSE_TIMEOUT_MS = 700;
 const uint8_t REQUEST_ATTEMPTS = 3;
@@ -145,12 +145,12 @@ bool setNodesMode(bool communication) {
 void writeSystemModeResponse() {
   char result[RESPONSE_SIZE];
   if (selectedNode == 0) {
-    snprintf(result, sizeof(result), "OK MODE %s; NODES 1,2,3 MODE %s; SELECT NONE",
+    snprintf(result, sizeof(result), "OK MODE %s; NODES 1,2,3,4,5,6,7 MODE %s; SELECT NONE",
              communicationMode ? "COMM" : "FLASH",
              communicationMode ? "COMM" : "FLASH");
   } else {
     snprintf(result, sizeof(result),
-             "OK MODE %s; NODES 1,2,3 MODE %s; SELECT NODE %u",
+             "OK MODE %s; NODES 1,2,3,4,5,6,7 MODE %s; SELECT NODE %u",
              communicationMode ? "COMM" : "FLASH",
              communicationMode ? "COMM" : "FLASH",
              selectedNode);
@@ -176,7 +176,7 @@ void handleCommand(char *line) {
     if (action == NULL || nodeText == NULL || strtok(NULL, " \t") != NULL ||
         (strcmp(action, "ENABLE") != 0 && strcmp(action, "DISABLE") != 0) ||
         !parseNode(nodeText, node)) {
-      writeHostLine("ERR UPDI USES ENABLE|DISABLE NODE 1, 2, OR 3");
+      writeHostLine("ERR UPDI USES ENABLE|DISABLE NODE 1 THROUGH 7");
       return;
     }
     char nodeCommand[16];
@@ -254,7 +254,7 @@ void handleCommand(char *line) {
     uint8_t selected;
     char *nodeText = strtok(NULL, " \t");
     if (!parseNode(nodeText, selected) || strtok(NULL, " \t") != NULL) {
-      writeHostLine("ERR SELECT USES NODE 1, 2, OR 3");
+      writeHostLine("ERR SELECT USES NODE 1 THROUGH 7");
       return;
     }
     char response[RESPONSE_SIZE];

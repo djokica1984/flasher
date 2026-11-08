@@ -52,6 +52,14 @@ andruino/
       BlinkNode2.ino
     BlinkNode3/
       BlinkNode3.ino
+    BlinkNode4/
+      BlinkNode4.ino
+    BlinkNode5/
+      BlinkNode5.ino
+    BlinkNode6/
+      BlinkNode6.ino
+    BlinkNode7/
+      BlinkNode7.ino
     libraries/
       AndruinoBusNode/
         library.properties
@@ -359,7 +367,18 @@ andruino-flash flash-sketch \
   /storage/emulated/0/Download/andruino/attiny1614/BlinkNode1/BlinkNode1.ino
 ```
 
-Change the final path to `BlinkNode2` or `BlinkNode3` for the corresponding physical node. Disconnect the Uno UPDI wire and move it to exactly one ATtiny before each operation.
+Change the final path to `BlinkNode2` through `BlinkNode7` for each corresponding physical node. For manual seven-node flashing, enable only that node's UPDI gate, disconnect the shared UPDI wire electrically or isolate the other gates, and flash exactly one node at a time:
+
+```sh
+for n in 1 2 3 4 5 6 7; do
+  echo "Connect only node $n UPDI/isolation gate and press Enter"
+  read
+  andruino-flash flash-sketch --platform attiny1614 --usb-device "$UNO_USB" \
+    "/storage/emulated/0/Download/andruino/attiny1614/BlinkNode$n/BlinkNode$n.ino"
+done
+```
+
+Before automated gate-controlled flashing can be trusted, test `UPDI ENABLE n` and `UPDI DISABLE n` for every node independently and verify with a multimeter or AVRDUDE that non-selected gates are electrically isolated.
 
 ## 9. Recreate and test from scratch
 
