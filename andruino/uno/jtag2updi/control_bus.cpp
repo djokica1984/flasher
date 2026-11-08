@@ -120,6 +120,7 @@ bool readBusResponse(uint8_t node, const char *command, char *response, size_t r
         length = 0;
         continue;
       }
+      if ((uint8_t)character < 0x20 || (uint8_t)character > 0x7e) continue;
       if (length + 1 >= responseSize) {
         length = 0;
         continue;

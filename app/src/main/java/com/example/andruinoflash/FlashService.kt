@@ -271,10 +271,12 @@ class FlashService : Service() {
                     throw IOException("Uno returned an empty control-bus response")
                 }
                 if (character != '\r'.code.toByte()) {
+                    val unsigned = character.toInt() and 0xff
+                    if (unsigned < 0x20 || unsigned > 0x7e) continue
                     if (response.size() >= MAX_CONTROL_RESPONSE_LENGTH) {
                         throw IOException("Uno control-bus response exceeded the size limit")
                     }
-                    response.write(character.toInt())
+                    response.write(unsigned)
                 }
             }
         }
