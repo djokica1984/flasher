@@ -308,14 +308,8 @@ void setup() {
 void loop() {
   static char line[32];
   static uint8_t length = 0;
-  static bool overflow = false;
-  static uint32_t lastUpdiRefreshAt = 0;
+  static   bool overflow = false;
 
-  const uint32_t now = millis();
-  if (nodeMode == NODE_COMM && now - lastUpdiRefreshAt >= 100) {
-    digitalWrite(FLASH_SELECT_PIN, LOW);
-    lastUpdiRefreshAt = now;
-  }
   updateVirtualMotor();
   updateBlink();
   while (Serial.available()) {
