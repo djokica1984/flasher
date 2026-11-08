@@ -29,22 +29,45 @@ SoftwareSerial busSerial(BUS_PIN, BUS_PIN);
 bool communicationMode = true;
 uint8_t selectedNode = 0;
 
-uint8_t beginBusRuntime() {
-  const uint8_t savedStatus = SREG;
+struct BusRuntimeState {
+  uint8_t sreg;
+  uint8_t tccr0a;
+  uint8_t tccr0b;
+  uint8_t tcnt0;
+  uint8_t ocr0a;
+  uint8_t tifr0;
+  uint8_t timsk0;
+};
+
+BusRuntimeState beginBusRuntime() {
+  BusRuntimeState state;
+  state.sreg = SREG;
   cli();
+  state.tccr0a = TCCR0A;
+  state.tccr0b = TCCR0B;
+  state.tcnt0 = TCNT0;
+  state.ocr0a = OCR0A;
+  state.tifr0 = TIFR0;
+  state.timsk0 = TIMSK0;
   TCCR0A = _BV(WGM01) | _BV(WGM00);
   TCCR0B = _BV(CS01) | _BV(CS00);
   TCNT0 = 0;
+  OCR0A = 0;
   TIFR0 = _BV(TOV0);
   TIMSK0 |= _BV(TOIE0);
   sei();
-  return savedStatus;
+  return state;
 }
 
-void endBusRuntime(uint8_t savedStatus) {
+void endBusRuntime(const BusRuntimeState &state) {
   cli();
-  TIMSK0 &= (uint8_t)~_BV(TOIE0);
-  SREG = savedStatus;
+  TCCR0A = state.tccr0a;
+  TCCR0B = state.tccr0b;
+  TCNT0 = state.tcnt0;
+  OCR0A = state.ocr0a;
+  TIFR0 = state.tifr0;
+  TIMSK0 = state.timsk0;
+  SREG = state.sreg;
 }
 
 void releaseBus() {
@@ -125,7 +148,7 @@ void makeNodeError(uint8_t node, char *response, size_t responseSize) {
 }
 
 bool setNodesMode(bool communication) {
-  char modeCommand[] = "MODE COMM";
+  char modeCommand[12] = "MODE COMM";
   if (!communication) strcpy(modeCommand, "MODE FLASH");
   char response[RESPONSE_SIZE];
   for (uint8_t node = FIRST_NODE; node <= LAST_NODE; ++node) {
@@ -385,7 +408,7 @@ void init() {
 }
 
 void handleHostCommand() {
-  const uint8_t savedStatus = beginBusRuntime();
+  const BusRuntimeState runtimeState = beginBusRuntime();
   char line[48];
   size_t length = 0;
   bool overflow = false;
@@ -406,6 +429,6 @@ void handleHostCommand() {
   } else {
     handleCommand(line);
   }
-  endBusRuntime(savedStatus);
+  endBusRuntime(runtimeState);
 }
 }
