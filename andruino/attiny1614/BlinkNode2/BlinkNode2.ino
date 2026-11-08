@@ -1,7 +1,7 @@
-// ATtiny1614 node 2 on the shared half-duplex control bus.
-// Connect PB3/RX (physical pin 6) and PB2/TX (physical pin 7) to Uno D5,
-// each through its own 1 kOhm series resistor. PB0 (physical pin 9) is the
-// inverted level of the active-low LED control on PA5 (physical pin 3) only in FLASH mode.
-// Use a common ground.
+// Fresh two-node bus node 2.
+// Physical pin 6 (PB3/RX) and pin 7 (PB2/TX) are connected to Uno D5,
+// each through an individual 1 kOhm resistor.
+// Physical pin 9 (PB1) is reserved for the external PMOS gate and must
+// remain electrically driven by Uno D4; the firmware never drives it.
 #define NODE_ADDRESS 2
 #include <attiny_bus_node.h>

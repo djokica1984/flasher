@@ -169,6 +169,26 @@ void handleCommand(char *line) {
     return;
   }
 
+  if (strcmp(command, "UPDI") == 0) {
+    char *action = strtok(NULL, " \t");
+    char *nodeText = strtok(NULL, " \t");
+    uint8_t node;
+    if (action == NULL || nodeText == NULL || strtok(NULL, " \t") != NULL ||
+        (strcmp(action, "ENABLE") != 0 && strcmp(action, "DISABLE") != 0) ||
+        !parseNode(nodeText, node)) {
+      writeHostLine("ERR UPDI USES ENABLE|DISABLE NODE 1, 2, OR 3");
+      return;
+    }
+    char nodeCommand[16];
+    snprintf(nodeCommand, sizeof(nodeCommand), "UPDI %s", action);
+    char response[RESPONSE_SIZE];
+    if (!requestNode(node, nodeCommand, response, sizeof(response))) {
+      makeNodeError(node, response, sizeof(response));
+    }
+    writeHostLine(response);
+    return;
+  }
+
   if (strcmp(command, "MODE") == 0) {
     char *mode = strtok(NULL, " \t");
     if (mode == NULL || strtok(NULL, " \t") != NULL) {
@@ -272,9 +292,12 @@ void handleCommand(char *line) {
     return;
   }
 
-  char forwardedCommand[24];
+  char forwardedCommand[48];
   if (strcmp(command, "PING") == 0 || strcmp(command, "STATUS") == 0 ||
-      strcmp(command, "VERSION") == 0) {
+      strcmp(command, "VERSION") == 0 || strcmp(command, "STOP") == 0 ||
+      strcmp(command, "READ_ENCODER") == 0 || strcmp(command, "RESET_ENCODER") == 0 ||
+      strcmp(command, "ANGLE") == 0 ||
+      strcmp(command, "MOTION_STATUS") == 0) {
     if (strtok(NULL, " \t") != NULL) {
       writeHostLine("ERR FORMAT");
       return;
@@ -289,6 +312,32 @@ void handleCommand(char *line) {
       return;
     }
     snprintf(forwardedCommand, sizeof(forwardedCommand), "BLINK %s", interval);
+  } else if (strcmp(command, "VALVE") == 0 || strcmp(command, "MOTOR") == 0) {
+    char *argument = strtok(NULL, " \t");
+    char *extra = strtok(NULL, " \t");
+    bool validValve = strcmp(command, "VALVE") == 0 && argument != NULL &&
+                      (strcmp(argument, "ON") == 0 || strcmp(argument, "OFF") == 0) && extra == NULL;
+    bool validMotorOff = strcmp(command, "MOTOR") == 0 && argument != NULL &&
+                         strcmp(argument, "OFF") == 0 && extra == NULL;
+    bool validMotorRun = false;
+    if (strcmp(command, "MOTOR") == 0 && argument != NULL &&
+        (strcmp(argument, "FORWARD") == 0 || strcmp(argument, "REVERSE") == 0)) {
+      char *duration = extra;
+      char *tail = duration == NULL ? NULL : strtok(NULL, " \t");
+      char *end = NULL;
+      const long ms = duration == NULL ? -1 : strtol(duration, &end, 10);
+      validMotorRun = duration != NULL && *end == '\0' && ms >= 1 && ms <= 60000 && tail == NULL;
+    }
+    if (!validValve && !validMotorOff && !validMotorRun) {
+      writeHostLine("ERR USE VALVE <ON|OFF> OR MOTOR <OFF|FORWARD|REVERSE> [1..60000 MS]");
+      return;
+    }
+    if (validMotorRun) {
+      snprintf(forwardedCommand, sizeof(forwardedCommand), "%s %s %s", command, argument,
+               extra);
+    } else {
+      snprintf(forwardedCommand, sizeof(forwardedCommand), "%s %s", command, argument);
+    }
   } else {
     writeHostLine("ERR COMMAND");
     return;

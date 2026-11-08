@@ -233,9 +233,12 @@ WDTtimeout=disabled,WDTwindow=disabled
 ```
 
 This uses the non-Optiboot `atxy4` profile and reserves the full 16 KB flash
-for the application. Compilation does not include fuse programming. The helper
-flashes and verifies the HEX only; it does not apply Arduino IDE upload-time
-fuse writes. The tested ATtiny fuses already matched the IDE profile.
+for the application. The helper programs the megaTinyCore 16 MHz internal-clock
+fuses together with the flash image. Do not omit this fuse step: AVRDUDE flash-only
+writes will leave a new ATtiny running at its factory oscillator setting, while
+the UART code in the HEX is compiled for 16 MHz, producing invalid 2400-baud
+communication. The ATtiny1614 fuse image is: fuse0=`0x00`, fuse1=`0x00`,
+fuse2=`0x01`, fuse5=`0xC6`, fuse6=`0x04`, fuse7=`0x00`, fuse8=`0x00`.
 
 ## 6. Identify the USB adapters
 

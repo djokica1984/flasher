@@ -31,6 +31,12 @@ uint8_t selectedNode = 0;
 uint16_t blinkIntervalMs = 1000;
 uint32_t lastBlinkAt = 0;
 bool ledOn = false;
+bool valveOn = false;
+bool motorForward = false;
+bool motorReverse = false;
+uint16_t motorRemainingMs = 0;
+uint32_t motorStartedAt = 0;
+uint16_t motorDurationMs = 0;
 
 void setNodeLed(bool on) {
   digitalWrite(PIN_PA5, on ? LOW : HIGH);
@@ -42,10 +48,10 @@ bool nodeLedOn() {
 
 void updateFlashSelectPin() {
   if (nodeMode != NODE_FLASH) {
-    digitalWrite(FLASH_SELECT_PIN, HIGH);
+    digitalWrite(FLASH_SELECT_PIN, LOW);
     return;
   }
-  digitalWrite(FLASH_SELECT_PIN, ledOn ? HIGH : LOW);
+  digitalWrite(FLASH_SELECT_PIN, ledOn ? LOW : HIGH);
 }
 
 void releaseBus() {
@@ -84,21 +90,30 @@ bool parseBlinkInterval(const char *text, uint16_t &interval) {
   return false;
 }
 
+void stopVirtualMotor() {
+  motorForward = false;
+  motorReverse = false;
+  motorRemainingMs = 0;
+}
+
 void sendStatus() {
   delay(BUS_TURNAROUND_MS);
   startTransmit();
-  Serial.print(F("NODE "));
-  Serial.print(NODE_ADDRESS);
-  Serial.print(F(" STATUS MODE "));
-  Serial.print(nodeMode == NODE_COMM ? F("COMM") : F("FLASH"));
-  Serial.print(F(" BLINK "));
-  Serial.print(blinkIntervalMs);
-  Serial.print(F(" SELECTION "));
-  Serial.print(selectedNode == NODE_ADDRESS ? F("SELECTED") : F("NOT_SELECTED"));
-  Serial.print(F(" LED "));
-  Serial.println(nodeLedOn() ? F("ON") : F("OFF"));
+  Serial.print(F("NODE ")); Serial.print(NODE_ADDRESS);
+  Serial.print(F(" STATUS MODE ")); Serial.print(nodeMode == NODE_COMM ? F("COMM") : F("FLASH"));
+  Serial.print(F(" VALVE ")); Serial.print(valveOn ? F("ON") : F("OFF"));
+  Serial.print(F(" MOTOR ")); Serial.print(motorForward ? F("FORWARD") : motorReverse ? F("REVERSE") : F("OFF"));
+  Serial.print(F(" LED ")); Serial.print(nodeLedOn() ? F("ON") : F("OFF"));
+  Serial.print(F(" UPDI ")); Serial.println(digitalRead(FLASH_SELECT_PIN) == LOW ? F("ENABLED") : F("DISABLED"));
   Serial.flush();
   releaseBus();
+}
+
+void updateVirtualMotor() {
+  if (!motorForward && !motorReverse) return;
+  if (motorDurationMs == 0 || millis() - motorStartedAt < motorDurationMs) return;
+  stopVirtualMotor();
+  motorDurationMs = 0;
 }
 
 void handleBusCommand(char *line) {
@@ -112,8 +127,21 @@ void handleBusCommand(char *line) {
     return;
   }
   if (strcmp(command, "VERSION") == 0 && strtok(NULL, " \t") == NULL) {
-    sendResponse(F("VERSION ANDRUINO-ATTINY1614-BUS-5"));
+    sendResponse(F("VERSION ANDRUINO-ATTINY1614-PB0-6"));
     return;
+  }
+  if (strcmp(command, "UPDI") == 0) {
+    char *action = strtok(NULL, " \t");
+    if (action != NULL && strcmp(action, "ENABLE") == 0 && strtok(NULL, " \t") == NULL) {
+      digitalWrite(FLASH_SELECT_PIN, LOW);
+      sendResponse(F("UPDI ENABLED"));
+      return;
+    }
+    if (action != NULL && strcmp(action, "DISABLE") == 0 && strtok(NULL, " \t") == NULL) {
+      digitalWrite(FLASH_SELECT_PIN, HIGH);
+      sendResponse(F("UPDI DISABLED"));
+      return;
+    }
   }
   if (strcmp(command, "STATUS") == 0 && strtok(NULL, " \t") == NULL) {
     sendStatus();
@@ -163,6 +191,67 @@ void handleBusCommand(char *line) {
     sendResponse(selectedNode == NODE_ADDRESS ? F("SELECTED") : F("NOT SELECTED"));
     return;
   }
+  if (strcmp(command, "STOP") == 0 && strtok(NULL, " \t") == NULL) {
+    stopVirtualMotor();
+    valveOn = false;
+    sendResponse(F("STOPPED VALVE OFF MOTOR OFF"));
+    return;
+  }
+  if (strcmp(command, "VALVE") == 0) {
+    char *state = strtok(NULL, " \t");
+    if (state != NULL && strtok(NULL, " \t") == NULL &&
+        (strcmp(state, "ON") == 0 || strcmp(state, "OFF") == 0)) {
+      valveOn = strcmp(state, "ON") == 0;
+      sendResponse(valveOn ? F("VALVE ON") : F("VALVE OFF"));
+      return;
+    }
+  }
+  if (strcmp(command, "MOTOR") == 0) {
+    char *state = strtok(NULL, " \t");
+    if (state != NULL && strcmp(state, "OFF") == 0 && strtok(NULL, " \t") == NULL) {
+      stopVirtualMotor();
+      motorDurationMs = 0;
+      sendResponse(F("MOTOR OFF"));
+      return;
+    }
+    char *durationText = strtok(NULL, " \t");
+    char *end = NULL;
+    if (state != NULL && durationText != NULL &&
+        (strcmp(state, "FORWARD") == 0 || strcmp(state, "REVERSE") == 0)) {
+      const long duration = strtol(durationText, &end, 10);
+      if (*durationText != '\0' && *end == '\0' && duration >= 1 && duration <= 60000 &&
+          strtok(NULL, " \t") == NULL) {
+        motorForward = strcmp(state, "FORWARD") == 0;
+        motorReverse = strcmp(state, "REVERSE") == 0;
+        motorDurationMs = (uint16_t)duration;
+        motorStartedAt = millis();
+        motorRemainingMs = motorDurationMs;
+        delay(BUS_TURNAROUND_MS);
+        startTransmit();
+        Serial.print(F("NODE ")); Serial.print(NODE_ADDRESS);
+        Serial.print(F(" MOTOR ")); Serial.print(state);
+        Serial.print(F(" STARTED MS ")); Serial.println(duration);
+        Serial.flush(); releaseBus();
+        return;
+      }
+    }
+  }
+  if (strcmp(command, "MOTION_STATUS") == 0 && strtok(NULL, " \t") == NULL) {
+    delay(BUS_TURNAROUND_MS);
+    startTransmit();
+    Serial.print(F("NODE ")); Serial.print(NODE_ADDRESS);
+    Serial.print(F(" MOTION MOTOR ")); Serial.print(motorForward ? F("FORWARD") : motorReverse ? F("REVERSE") : F("OFF"));
+    Serial.print(F(" VALVE ")); Serial.println(valveOn ? F("ON") : F("OFF"));
+    Serial.flush(); releaseBus();
+    return;
+  }
+  if ((strcmp(command, "READ_ENCODER") == 0 || strcmp(command, "ANGLE") == 0 ||
+       strcmp(command, "RESET_ENCODER") == 0) && strtok(NULL, " \t") == NULL) {
+    if (strcmp(command, "ANGLE") == 0) sendResponse(F("ANGLE -1"));
+    else if (strcmp(command, "RESET_ENCODER") == 0) sendResponse(F("ENCODER 0"));
+    else sendResponse(F("ENCODER -999999"));
+    return;
+  }
   if (strcmp(command, "BLINK") == 0) {
     uint16_t requestedInterval;
     if (nodeMode == NODE_COMM &&
@@ -203,18 +292,14 @@ void updateBlink() {
 }
 
 void setup() {
-  if (EEPROM.read(EEPROM_MAGIC_ADDRESS) == EEPROM_MAGIC) {
-    const uint8_t storedMode = EEPROM.read(EEPROM_MODE_ADDRESS);
-    const uint8_t storedSelection = EEPROM.read(EEPROM_SELECTED_ADDRESS);
-    if (storedMode <= NODE_FLASH && storedSelection <= 3) {
-      nodeMode = (NodeMode)storedMode;
-      selectedNode = storedSelection;
-    }
-  } else {
-    EEPROM.update(EEPROM_MODE_ADDRESS, NODE_COMM);
-    EEPROM.update(EEPROM_SELECTED_ADDRESS, 0);
-    EEPROM.update(EEPROM_MAGIC_ADDRESS, EEPROM_MAGIC);
-  }
+  // A node reset or application replacement must always leave UPDI and the
+  // communication bus enabled. The Uno explicitly restores FLASH/SELECT
+  // state after startup when that state is required.
+  nodeMode = NODE_COMM;
+  selectedNode = 0;
+  EEPROM.update(EEPROM_MODE_ADDRESS, NODE_COMM);
+  EEPROM.update(EEPROM_SELECTED_ADDRESS, 0);
+  EEPROM.update(EEPROM_MAGIC_ADDRESS, EEPROM_MAGIC);
   pinMode(PIN_PA5, OUTPUT);
   pinMode(FLASH_SELECT_PIN, OUTPUT);
   ledOn = nodeMode == NODE_FLASH && selectedNode == NODE_ADDRESS;
@@ -229,7 +314,14 @@ void loop() {
   static char line[32];
   static uint8_t length = 0;
   static bool overflow = false;
+  static uint32_t lastUpdiRefreshAt = 0;
 
+  const uint32_t now = millis();
+  if (nodeMode == NODE_COMM && now - lastUpdiRefreshAt >= 100) {
+    digitalWrite(FLASH_SELECT_PIN, LOW);
+    lastUpdiRefreshAt = now;
+  }
+  updateVirtualMotor();
   updateBlink();
   while (Serial.available()) {
     const char character = (char)Serial.read();
