@@ -201,9 +201,10 @@ divergent Nano copy is not used by `build` or `flash-sketch`.
 The selected `--platform` changes the compile and upload profile: Uno uses
 `arduino:avr:uno` and the standard bootloader rate; a classic Nano uses
 `arduino:avr:nano:cpu=atmega328old` and the old-bootloader upload rate.
-The firmware is intended to use the same D5 control-bus and D6 UPDI wiring on
-either board, but the Nano control bus is not currently working; see the
-[verified baseline](VERIFIED_BASELINE.md).
+The same D5 control-bus and D6 UPDI wiring passed the seven-node test with the
+Uno-tested master HEX uploaded to a Nano at the old-bootloader rate. A separate
+Nano-profile rebuild failed bus communication; use the archived known-good HEX
+and see the [verified baseline](VERIFIED_BASELINE.md).
 
 ## 5. Sketch layout and board profiles
 
@@ -314,9 +315,11 @@ andruino-flash flash-sketch --platform attiny1614 --node 1 --usb-device "$UNO_US
 andruino-flash flash-sketch --platform nano --usb-device "$NANO_USB" \
   "$ROOT/nano/Blink3000/Blink3000.ino"
 
-# Put the same JTAG2UPDI source on the Nano using its old-bootloader profile.
-andruino-flash flash-sketch --platform nano --usb-device "$NANO_USB" \
-  "$ROOT/uno/jtag2updi/jtag2updi.ino"
+# Put the exact Uno-tested JTAG2UPDI image on the Nano using its old-bootloader profile.
+# First copy releases/uno-jtag2updi/uno-jtag2updi-strict.hex to this path.
+MASTER_HEX=/storage/emulated/0/Download/uno-jtag2updi-strict.hex
+echo "19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d  $MASTER_HEX" | sha256sum -c -
+andruino-flash flash-platform --usb-device "$NANO_USB" nano "$MASTER_HEX"
 andruino-flash flash-sketch --platform attiny1614 --node 1 --usb-device "$NANO_USB" \
   "$ROOT/attiny1614/Blink3000/Blink3000.ino"
 ```
@@ -368,11 +371,11 @@ selected board immediately.
 ## 8. Uno/Nano control bus for seven ATtiny1614 nodes
 
 The shared bus firmware is designed for either the **Uno or classic Nano
-JTAG2UPDI master** and up to seven ATtiny1614 nodes. The complete bus test is
-verified on Uno; the Nano was built and flash-verified from the same source but
-currently does not communicate with the nodes. See the [verified baseline](VERIFIED_BASELINE.md)
-before treating Nano as working. The intended wiring is the same for both
-boards. Connect master D5 to each node's PB3/RX signal through its own
+JTAG2UPDI master** and up to seven ATtiny1614 nodes. The full test passed on
+both boards when the exact Uno-tested master HEX was used on Nano with the
+old-bootloader upload profile. A separate Nano-profile rebuild did not
+communicate; use the archived known-good HEX and see the
+[verified baseline](VERIFIED_BASELINE.md). Connect master D5 to each node's PB3/RX signal through its own
 1 kOhm series resistor; connect each node's PB2/TX signal to the same bus
 through its own 1 kOhm series resistor. Use the pinout for your exact ATtiny
 package or breakout board to locate PB3 and PB2; do not rely on package pin
@@ -577,7 +580,8 @@ The tested environment used:
 Reference Blink builds were about 922-924 bytes for Uno/Nano and 686-688 bytes
 for ATtiny1614, with 9-10 bytes of global variables. JTAG2UPDI builds were
 3,984 bytes with 715 bytes of global variables in an earlier, pre-control-bus
-build. The verified control-bus master compiled for Nano old bootloader was
-13,106 bytes with 1,676 bytes of global memory. Exact sizes can vary with
-Arduino CLI/core/toolchain versions; see the verified baseline for artifact
-hashes and the complete test record.
+build. A separate control-bus Nano-profile rebuild was 13,106 bytes with 1,676
+bytes of global memory, but it did not communicate with the nodes. The
+15,216-byte Uno-tested master HEX did pass the full Nano test when uploaded at
+the Nano old-bootloader rate. See the verified baseline for exact hashes and
+the complete test record.

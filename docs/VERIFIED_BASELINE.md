@@ -1,9 +1,8 @@
 # Verified build and hardware baseline
 
 Last recorded: 2026-11-13. This is the reproducibility record for the
-seven-node ATtiny1614 system. It distinguishes verified behavior from open
-issues; the Nano result below is a failure, not a claim that the Nano bus is
-working.
+seven-node ATtiny1614 system. It records both the successful exact-image Nano
+test and the failed Nano-profile rebuild; those are different firmware images.
 
 ## Canonical sources
 
@@ -12,6 +11,11 @@ working.
   with `--platform uno` or `--platform nano`; Nano uses
   `arduino:avr:nano:cpu=atmega328old` (old bootloader, 57,600 baud). Do not
   treat `andruino/nano/jtag2updi/` as a second source of truth.
+- The exact image that passed the latest Nano test is
+  `releases/uno-jtag2updi/uno-jtag2updi-strict.hex`, SHA-256
+  `19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d`.
+  It is the same 15,216-byte image previously read-back verified on the Uno;
+  "strict" is only its filename, not a firmware version.
 - The bus is half-duplex on the same master D5 line for either board. Only
   node 1's UPDI was physically connected to the programmer at the latest
   seven-node test; this does not imply that all seven UPDI pins were tested
@@ -23,9 +27,14 @@ working.
   may need approval again after reconnecting. USB device paths are ephemeral;
   rediscover them with `andruino-flash devices`.
 
-### Critical source fingerprints
+### Current tracked source fingerprints
 
-SHA-256 values for the tested source files:
+SHA-256 values for the current checked-out source files:
+
+The original compile-time source hashes for the archived
+`uno-jtag2updi-strict.hex` were not captured. Its exact binary is preserved and
+identified by SHA-256 below; the source hashes in this section describe the
+current repository tree and are not asserted to recreate that historical image.
 
 | File | SHA-256 |
 |---|---|
@@ -69,14 +78,14 @@ SHA-256 values for the tested source files:
 | Termux CLI | `tools/andruino-flash` / `~/bin/andruino-flash` | `d0962ea5ed65ed88dace9989a9e508609de08214f0a4ed9cae4580d923aed643` |
 | Seven-node test driver | `comprehensive_test.sh` / `~/comprehensive_test_nano.sh` | `ecb89411497f106ffd1e2f1cd804a6f9f0787e5551dc716cd7342243427005d8` |
 | Installed debug APK | `releases/andruino-flash-debug.apk` | `7bd784f6f33aab5d48d1afab35f006c75c6347bbb658f62c2ae89c5fa97a1a5f` |
-| Uno JTAG2UPDI HEX | `releases/uno-jtag2updi/jtag2updi-fixed.hex` | `19cc9817511668e7c8f416b3a98e9ec57fa4bbf329e0ced53af1ce86972f2e01` |
-| Nano old-bootloader HEX | `releases/nano-jtag2updi/jtag2updi-nano-old-bootloader.hex` | `8cd615fdae4d2e67c2ce5bc51669fda72df3b801a759ead9262d0223ba23b940` |
+| Known-good Uno-tested master HEX | `releases/uno-jtag2updi/uno-jtag2updi-strict.hex` | `19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d` |
+| Nano-profile rebuild HEX (flash verified; bus failed) | `releases/nano-jtag2updi/jtag2updi-nano-old-bootloader.hex` | `8cd615fdae4d2e67c2ce5bc51669fda72df3b801a759ead9262d0223ba23b940` |
 
-The test driver was copied to Termux and passed `bash -n`; the remote copy's
-SHA-256 matched the repository file. For a fresh build/install, follow
+The test driver was copied to Termux and passed `bash -n`; its remote SHA-256
+matched the repository file before the Nano test. For a fresh build/install, follow
 [`REPRODUCING.md`](REPRODUCING.md), then copy the checked-in CLI and test driver
-to the Termux paths above. The release Nano HEX is the exact image used for
-the recorded Nano flash verification.
+to the Termux paths above. Use the known-good Uno-tested HEX above to reproduce
+the Nano result; the Nano-profile rebuild is retained as a failed comparison.
 
 ## Hardware test results
 
@@ -92,31 +101,50 @@ protocol/command checks passing. The STATUS reply is deliberately compact, for
 example `NODE 1 STATUS COMM V=OFF M=OFF L=OFF U=ON`, to reduce serial-buffer
 pressure.
 
-The current test driver has SHA-256
-`ecb89411497f106ffd1e2f1cd804a6f9f0787e5551dc716cd7342243427005d8` and was
-synced and syntax-checked after the successful hardware run. The earlier
-device-side copy's hash was not captured at run time, so the current checked-in
-driver is the exact version to use for future reproductions; do not infer an
-uncaptured device-side hash for the historical run.
+The test driver has SHA-256
+`ecb89411497f106ffd1e2f1cd804a6f9f0787e5551dc716cd7342243427005d8`; the
+Termux copy matched this hash before the Nano run.
 
 The Uno test verifies software protocol and stored command state only. It does
 not measure physical valve/motor movement, sensor readings, or electrical
 isolation of UPDI.
 
-### Nano master — flashed, bus not working
+### Nano master — passed with exact Uno-tested image
 
-The canonical Uno master source above was compiled for Nano using
-`arduino:avr:nano:cpu=atmega328old`. The resulting image was 13,106 bytes with
-1,676 bytes of global memory. It was uploaded using the old bootloader and
-AVRDUDE read-back verified all 13,106 bytes; the exact HEX is the release
-artifact listed above.
+A Nano-profile rebuild of the canonical source used
+`arduino:avr:nano:cpu=atmega328old`, produced 13,106 bytes with 1,676 bytes of
+global memory, and passed AVRDUDE read-back verification. That image did not
+communicate with the nodes: DISCOVER timed out. It is retained above as a
+failed comparison.
 
-After reconnecting the wiring as used with the Uno, the Nano appeared at
-`/dev/bus/usb/001/014`. DISCOVER timed out, and PING and STATUS to nodes 1–7
-all returned `ERR NO RESPONSE FROM NODE n`. The Uno-tested node firmware
-therefore remains known-good with the Uno, but the Nano control bus is not
-restored. The cause has not been proven; do not treat the matching source,
-successful Nano flash verification, or USB enumeration as evidence that the
-bus works. Use the same documented wiring and isolate the Nano D5 bus signal,
-common ground, and timing against the working Uno baseline before claiming a
-fix.
+The working image was the exact 15,216-byte `uno-jtag2updi-strict.hex` that had
+previously passed AVRDUDE read-back verification on the Uno (Uno upload at
+115,200 baud on 2026-11-08). Its SHA-256 was checked on the phone before use.
+It was uploaded unchanged with:
+
+```sh
+andruino-flash flash-platform --usb-device /dev/bus/usb/001/014 nano \
+  /storage/emulated/0/Download/uno-jtag2updi-strict.hex
+```
+
+The Nano old-bootloader profile used 57,600 baud; AVRDUDE verified all 15,216
+bytes.
+
+With the Nano at `/dev/bus/usb/001/014`, the comprehensive run then:
+
+- discovered nodes 1–7 and passed initial PING for each;
+- reflashed the matching `BlinkNode1.ino` through `BlinkNode7.ino`, with
+  6,140 flash bytes read-back verified for each node;
+- passed all 175 checks across STATUS, PING/VERSION, LED/BLINK, UPDI enable/
+  disable, valve/motor commands, stop, motion status, encoder/angle, and
+  mode/selection.
+
+The script ended with `PASS: all seven nodes reflashed and all protocol/command
+checks passed.` Afterward, a separate DISCOVER and two consecutive PING passes
+for nodes 1–7 also passed. This confirms the exact Uno-tested image works on
+the Nano when uploaded with Nano's bootloader rate. It does not explain why
+the separate Nano-profile rebuild differs or fails; use the archived known-good
+HEX for reproducibility until that difference is investigated.
+
+As with the Uno run, the suite verifies firmware protocol and logical command
+state only; it does not measure physical valve/motor movement or sensor output.

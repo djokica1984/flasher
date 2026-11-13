@@ -101,6 +101,9 @@ andruino-flash devices
 UNO_USB=/dev/bus/usb/001/008
 NANO_USB=/dev/bus/usb/001/009
 ROOT=/storage/emulated/0/Download/andruino
+MASTER_HEX=/storage/emulated/0/Download/uno-jtag2updi-strict.hex
+# Copy releases/uno-jtag2updi/uno-jtag2updi-strict.hex to MASTER_HEX first.
+echo "19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d  $MASTER_HEX" | sha256sum -c -
 
 # Uno itself.
 andruino-flash flash-sketch --platform uno --usb-device "$UNO_USB" \
@@ -116,9 +119,8 @@ andruino-flash flash-sketch --platform uno --usb-device "$UNO_USB" \
 andruino-flash flash-sketch --platform attiny1614 --usb-device "$UNO_USB" \
   "$ROOT/attiny1614/Blink1000/Blink1000.ino"
 
-# Nano's ATtiny: use the same master sketch source with the Nano profile.
-andruino-flash flash-sketch --platform nano --usb-device "$NANO_USB" \
-  "$ROOT/uno/jtag2updi/jtag2updi.ino"
+# Nano master: use the exact Uno-tested image with the Nano upload profile.
+andruino-flash flash-platform --usb-device "$NANO_USB" nano "$MASTER_HEX"
 andruino-flash flash-sketch --platform attiny1614 --usb-device "$NANO_USB" \
   "$ROOT/attiny1614/Blink1000/Blink1000.ino"
 
@@ -131,21 +133,21 @@ andruino-flash flash-platform --usb-device "$UNO_USB" uno \
   "$ROOT/uno/jtag2updi/jtag2updi.ino.hex"
 andruino-flash flash-platform --usb-device "$UNO_USB" attiny1614 \
   "$ROOT/attiny1614/Blink1000/Blink1000.ino.hex"
-andruino-flash flash-platform --usb-device "$NANO_USB" nano \
-  "$ROOT/uno/jtag2updi/jtag2updi.ino.hex"
+andruino-flash flash-platform --usb-device "$NANO_USB" nano "$MASTER_HEX"
 andruino-flash flash-platform --usb-device "$NANO_USB" attiny1614 \
   "$ROOT/attiny1614/Blink1000/Blink1000.ino.hex"
 ```
 
 ### Uno/Nano control bus
 
-The shared JTAG2UPDI master source is buildable for Uno and Nano and is designed
-for up to seven addressed ATtiny1614 nodes on the same D5 half-duplex bus.
-The complete bus test is verified on Uno. The Nano image was compiled and
-flash-verified, but currently does not communicate with the nodes; see the
-[verified baseline](docs/VERIFIED_BASELINE.md) before treating Nano as working.
-The Android app uses the USB path and AVRDUDE arguments supplied by the CLI and
-does not need to know which master board is connected.
+The shared JTAG2UPDI master source is designed for up to seven addressed
+ATtiny1614 nodes on the same D5 half-duplex bus. The full test passes on Uno
+and on Nano when the exact Uno-tested image is uploaded using Nano's
+old-bootloader profile. A separate Nano-profile rebuild was flash-verified but
+did not communicate; the known-good HEX and results are in the
+[verified baseline](docs/VERIFIED_BASELINE.md). The Android app uses the USB
+path and AVRDUDE arguments supplied by the CLI and does not need to know which
+master board is connected.
 
 ```sh
 andruino-flash bus --usb-device "$UNO_USB" PING 1
