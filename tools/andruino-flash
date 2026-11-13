@@ -38,20 +38,6 @@ platform_for_sketch_dir() {
     esac
 }
 
-master_source_for_sketch_dir() {
-    local sketch_dir="$1"
-    local parent_dir master_source
-    parent_dir="$(basename -- "$(dirname -- "$sketch_dir")")"
-    if [[ "$(basename -- "$sketch_dir")" == "jtag2updi" && "$parent_dir" == "nano" ]]; then
-        master_source="$sketch_root/uno/jtag2updi"
-        if [[ -f "$master_source/jtag2updi.ino" ]]; then
-            printf '%s\n' "$master_source"
-            return
-        fi
-    fi
-    printf '%s\n' "$sketch_dir"
-}
-
 fqbn_for_platform() {
     case "$1" in
         uno) echo "arduino:avr:uno" ;;
@@ -78,6 +64,10 @@ build_sketch_dir() {
         platform="$requested_platform"
     else
         platform="$(platform_for_sketch_dir "$sketch_dir")"
+    fi
+    if [[ "$platform" == "nano" && "$sketch_name" == "jtag2updi" ]]; then
+        echo "Nano JTAG2UPDI source builds are disabled; use the verified uno-jtag2updi-strict.hex image." >&2
+        return 2
     fi
     fqbn="$(fqbn_for_platform "$platform")"
     if ! command -v proot-distro >/dev/null 2>&1; then
@@ -124,12 +114,15 @@ build_all_sketches() {
         echo "No .ino sketches found under $sketch_root" >&2
         return 1
     fi
-    local sketch sketch_dir platform source_dir
+    local sketch sketch_dir platform
     for sketch in "${sketches[@]}"; do
         sketch_dir="$(sketch_dir_for "$sketch")"
         platform="$(platform_for_sketch_dir "$sketch_dir")"
-        source_dir="$(master_source_for_sketch_dir "$sketch_dir")"
-        build_sketch_dir "$source_dir" "$platform" "$sketch_dir"
+        if [[ "$platform" == "nano" && "$(basename -- "$sketch_dir")" == "jtag2updi" ]]; then
+            echo "Skipping Nano JTAG2UPDI source build; use the verified uno-jtag2updi-strict.hex image." >&2
+            continue
+        fi
+        build_sketch_dir "$sketch_dir" "$platform" "$sketch_dir"
     done
 }
 
@@ -267,6 +260,7 @@ startup_system() {
 flash_platform() {
     local platform="$1"
     local firmware="$2"
+    local expected_hash actual_hash
     if [[ ! -f "$firmware" ]]; then
         echo "Firmware file does not exist: $firmware" >&2
         return 2
@@ -275,6 +269,22 @@ flash_platform() {
         echo "flash-platform requires an Intel HEX file (*.hex), not: $firmware" >&2
         echo "Use flash-sketch to build and flash a sketch, or pass the generated .ino.hex file." >&2
         return 2
+    fi
+    if [[ "$platform" == "nano" && "$firmware" == *jtag2updi* ]]; then
+        expected_hash="19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d"
+        if ! command -v sha256sum >/dev/null 2>&1; then
+            echo "sha256sum is required to verify the approved Nano JTAG2UPDI image." >&2
+            return 1
+        fi
+        if ! actual_hash="$(sha256sum -- "$firmware" | awk '{print $1}')"; then
+            echo "Could not verify Nano JTAG2UPDI firmware: $firmware" >&2
+            return 1
+        fi
+        if [[ "$actual_hash" != "$expected_hash" ]]; then
+            echo "Refusing unverified Nano JTAG2UPDI image; use uno-jtag2updi-strict.hex." >&2
+            echo "Expected SHA-256: $expected_hash" >&2
+            return 2
+        fi
     fi
     if [[ "$platform" == "uno" && "$firmware" == *"/attiny1614/"* ]]; then
         echo "Refusing unsafe firmware selection: an ATtiny1614 HEX cannot be flashed to the Uno." >&2
@@ -395,8 +405,7 @@ case "$action" in
                 else
                     platform="$(platform_for_sketch_dir "$sketch_dir")"
                 fi
-                source_dir="$(master_source_for_sketch_dir "$sketch_dir")"
-                build_sketch_dir "$source_dir" "$platform" "$sketch_dir"
+                build_sketch_dir "$sketch_dir" "$platform" "$sketch_dir"
             done
         fi
         exit $?
@@ -469,8 +478,7 @@ case "$action" in
             echo "--node can only be used when flashing an ATtiny1614 sketch" >&2
             exit 2
         fi
-        source_dir="$(master_source_for_sketch_dir "$sketch_dir")"
-        build_sketch_dir "$source_dir" "$platform" "$sketch_dir"
+        build_sketch_dir "$sketch_dir" "$platform" "$sketch_dir"
         flash_platform "$platform" "$sketch_dir/$(basename -- "$sketch_dir").ino.hex"
         exit $?
         ;;

@@ -195,12 +195,12 @@ phone sketch tree but are not required for this guide.
 ### Shared JTAG2UPDI firmware
 
 The canonical JTAG2UPDI source, including the control-bus extension, is
-`$ROOT/uno/jtag2updi`. Use that same source for both master boards. The CLI
-maps the legacy `$ROOT/nano/jtag2updi` path to this canonical source, so a
-divergent Nano copy is not used by `build` or `flash-sketch`.
-The selected `--platform` changes the compile and upload profile: Uno uses
-`arduino:avr:uno` and the standard bootloader rate; a classic Nano uses
-`arduino:avr:nano:cpu=atmega328old` and the old-bootloader upload rate.
+`$ROOT/uno/jtag2updi`; use it for the Uno. **Do not build or flash that source
+for Nano.** For Nano, use only the hash-verified `uno-jtag2updi-strict.hex`
+artifact below. The CLI rejects Nano JTAG2UPDI source builds and refuses Nano
+JTAG2UPDI HEX files unless their hash matches that tested artifact. Other Nano
+sketches use `arduino:avr:nano:cpu=atmega328old` and the old-bootloader upload
+rate.
 The same D5 control-bus and D6 UPDI wiring passed the seven-node test with the
 Uno-tested master HEX uploaded to a Nano at the old-bootloader rate. A separate
 Nano-profile rebuild failed bus communication; use the archived known-good HEX
@@ -370,7 +370,7 @@ selected board immediately.
 
 ## 8. Uno/Nano control bus for seven ATtiny1614 nodes
 
-The shared bus firmware is designed for either the **Uno or classic Nano
+The verified bus firmware supports either the **Uno or classic Nano
 JTAG2UPDI master** and up to seven ATtiny1614 nodes. The full test passed on
 both boards when the exact Uno-tested master HEX was used on Nano with the
 old-bootloader upload profile. A separate Nano-profile rebuild did not

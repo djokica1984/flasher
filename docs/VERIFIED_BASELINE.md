@@ -6,11 +6,11 @@ test and the failed Nano-profile rebuild; those are different firmware images.
 
 ## Canonical sources
 
-- The one shared master sketch is
-  [`andruino/uno/jtag2updi/`](../andruino/uno/jtag2updi/). Compile that source
-  with `--platform uno` or `--platform nano`; Nano uses
-  `arduino:avr:nano:cpu=atmega328old` (old bootloader, 57,600 baud). Do not
-  treat `andruino/nano/jtag2updi/` as a second source of truth.
+- The Uno master source is
+  [`andruino/uno/jtag2updi/`](../andruino/uno/jtag2updi/). Do not compile or
+  flash `jtag2updi.ino` for Nano. Nano must use the exact strict HEX below,
+  uploaded with `arduino:avr:nano:cpu=atmega328old` (old bootloader, 57,600 baud).
+  Do not treat `andruino/nano/jtag2updi/` as a Nano source of truth.
 - The exact image that passed the latest Nano test is
   `releases/uno-jtag2updi/uno-jtag2updi-strict.hex`, SHA-256
   `19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d`.
@@ -75,7 +75,7 @@ current repository tree and are not asserted to recreate that historical image.
 
 | Artifact | Repository path / Termux path | SHA-256 |
 |---|---|---|
-| Termux CLI | `tools/andruino-flash` / `~/bin/andruino-flash` | `d0962ea5ed65ed88dace9989a9e508609de08214f0a4ed9cae4580d923aed643` |
+| Termux CLI | `tools/andruino-flash` / `~/bin/andruino-flash` | `2110a6603d3e902358950795f9d4132b23e11bc6ecc6c27bb4c37850943cd28f` |
 | Seven-node test driver | `comprehensive_test.sh` / `~/comprehensive_test_nano.sh` | `ecb89411497f106ffd1e2f1cd804a6f9f0787e5551dc716cd7342243427005d8` |
 | Installed debug APK | `releases/andruino-flash-debug.apk` | `7bd784f6f33aab5d48d1afab35f006c75c6347bbb658f62c2ae89c5fa97a1a5f` |
 | Known-good Uno-tested master HEX | `releases/uno-jtag2updi/uno-jtag2updi-strict.hex` | `19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d` |
