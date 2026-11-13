@@ -87,24 +87,16 @@ void sendBusCommand(uint8_t node, const char *command) {
 }
 
 bool responseMatchesCommand(uint8_t node, const char *command, const char *response) {
-  if (strncmp(command, "PING", 4) == 0) {
-    char expected[16];
-    snprintf(expected, sizeof(expected), "NODE %u PONG", node);
-    return strcmp(response, expected) == 0;
-  }
-  if (strncmp(command, "BLINK ", 6) == 0) {
-    char expected[24];
-    snprintf(expected, sizeof(expected), "NODE %u BLINK %s", node, command + 6);
-    return strcmp(response, expected) == 0;
-  }
-  if (strncmp(command, "LED ", 4) == 0) {
-    char expected[24];
-    snprintf(expected, sizeof(expected), "NODE %u LED %s", node, command + 4);
-    return strcmp(response, expected) == 0;
-  }
   char prefix[12];
   snprintf(prefix, sizeof(prefix), "NODE %u ", node);
-  return strncmp(response, prefix, strlen(prefix)) == 0;
+  const size_t prefixLength = strlen(prefix);
+  if (strncmp(response, prefix, prefixLength) != 0) return false;
+  const char *responseCommand = response + prefixLength;
+  if (strcmp(command, "PING") == 0) return strcmp(responseCommand, "PONG") == 0;
+  if (strncmp(command, "BLINK ", 6) == 0 || strncmp(command, "LED ", 4) == 0) {
+    return strcmp(responseCommand, command) == 0;
+  }
+  return true;
 }
 
 bool readBusResponse(uint8_t node, const char *command, char *response, size_t responseSize) {

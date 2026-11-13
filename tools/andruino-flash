@@ -7,11 +7,12 @@ request_id="cli-$(date +%s)-$$-$RANDOM"
 result_dir="${ANDRUINO_RESULT_DIR:-/storage/emulated/0/Download/AndruinoFlash}"
 result_file="$result_dir/$request_id.log"
 sketch_root="${ANDRUINO_SKETCH_ROOT:-/storage/emulated/0/Download/andruino}"
-usage="Usage: andruino-flash startup [--mode COMM|FLASH] | devices | bus --usb-device PATH PING|STATUS|VERSION NODE | BLINK NODE 50..60000 | SELECT NODE | DISCOVER | MODE COMM|FLASH | UPDI ENABLE|DISABLE NODE | build [--platform uno|nano|attiny1614] [SKETCH_DIR_OR_INO...] | flash-sketch [--platform uno|nano|attiny1614] [--usb-device PATH] SKETCH_DIR_OR_INO | flash-platform [--usb-device PATH] uno|nano|attiny1614 HEX | signature [--usb-device PATH] | flash [--usb-device PATH] HEX | run [--usb-device PATH] -- AVRDUDE_OPTIONS..."
+usage="Usage: andruino-flash startup [--usb-device PATH] [--mode COMM|FLASH] | devices | bus --usb-device PATH PING|STATUS|VERSION NODE | BLINK NODE 50..60000 | SELECT NODE | DISCOVER | MODE COMM|FLASH | UPDI ENABLE|DISABLE NODE | build [--platform uno|nano|attiny1614] [SKETCH_DIR_OR_INO...] | flash-sketch [--platform uno|nano|attiny1614] [--node 1..7] [--usb-device PATH] SKETCH_DIR_OR_INO | flash-platform [--node 1..7] [--usb-device PATH] uno|nano|attiny1614 HEX | signature [--usb-device PATH] | flash [--usb-device PATH] HEX | run [--usb-device PATH] -- AVRDUDE_OPTIONS..."
 usb_device_path=""
 service_action="run"
 avrdude_args=()
 bus_command=""
+updi_node=""
 
 sketch_dir_for() {
     local path="$1"
@@ -37,6 +38,20 @@ platform_for_sketch_dir() {
     esac
 }
 
+master_source_for_sketch_dir() {
+    local sketch_dir="$1"
+    local parent_dir master_source
+    parent_dir="$(basename -- "$(dirname -- "$sketch_dir")")"
+    if [[ "$(basename -- "$sketch_dir")" == "jtag2updi" && "$parent_dir" == "nano" ]]; then
+        master_source="$sketch_root/uno/jtag2updi"
+        if [[ -f "$master_source/jtag2updi.ino" ]]; then
+            printf '%s\n' "$master_source"
+            return
+        fi
+    fi
+    printf '%s\n' "$sketch_dir"
+}
+
 fqbn_for_platform() {
     case "$1" in
         uno) echo "arduino:avr:uno" ;;
@@ -52,6 +67,7 @@ fqbn_for_platform() {
 build_sketch_dir() {
     local sketch_dir="$1"
     local requested_platform="${2:-}"
+    local output_dir="${3:-$sketch_dir}"
     local sketch_name platform fqbn build_dir built_hex output_hex
     sketch_name="$(basename -- "$sketch_dir")"
     if [[ ! -f "$sketch_dir/$sketch_name.ino" ]]; then
@@ -69,7 +85,7 @@ build_sketch_dir() {
         return 1
     fi
 
-    build_dir="$(mktemp -d "$sketch_dir/.andruino-build.XXXXXX")"
+    build_dir="$(mktemp -d "$output_dir/.andruino-build.XXXXXX")"
     (
         trap 'rm -rf -- "$build_dir"' EXIT
         local board_options=()
@@ -94,7 +110,7 @@ build_sketch_dir() {
             echo "Arduino CLI did not produce the expected HEX file: $built_hex" >&2
             exit 1
         fi
-        output_hex="$sketch_dir/$sketch_name.ino.hex"
+        output_hex="$output_dir/$sketch_name.ino.hex"
         cp -- "$built_hex" "$output_hex"
         echo "Built $sketch_dir/$sketch_name.ino for $platform ($fqbn)"
         echo "HEX: $output_hex"
@@ -108,9 +124,12 @@ build_all_sketches() {
         echo "No .ino sketches found under $sketch_root" >&2
         return 1
     fi
-    local sketch
+    local sketch sketch_dir platform source_dir
     for sketch in "${sketches[@]}"; do
-        build_sketch_dir "$(sketch_dir_for "$sketch")"
+        sketch_dir="$(sketch_dir_for "$sketch")"
+        platform="$(platform_for_sketch_dir "$sketch_dir")"
+        source_dir="$(master_source_for_sketch_dir "$sketch_dir")"
+        build_sketch_dir "$source_dir" "$platform" "$sketch_dir"
     done
 }
 
@@ -147,6 +166,8 @@ run_avrdude() {
     fi
     if [[ "$service_action" == "bus" ]]; then
         intent_args+=(--es busCommand "$bus_command")
+    elif [[ "$service_action" == "run" && -n "$updi_node" ]]; then
+        intent_args+=(--ei updiNode "$updi_node")
     fi
     /system/bin/am start-foreground-service --user 0 \
         -n "$package_name/.FlashService" \
@@ -166,6 +187,13 @@ run_avrdude() {
     fi
 }
 
+run_bus_request() {
+    new_request_context
+    service_action="bus"
+    bus_command="$1"
+    run_avrdude
+}
+
 new_request_context() {
     request_id="cli-$(date +%s)-$$-$RANDOM"
     result_file="$result_dir/$request_id.log"
@@ -173,42 +201,59 @@ new_request_context() {
 
 startup_system() {
     local startup_mode="COMM"
-    if [[ "${1:-}" == "--mode" ]]; then
-        if [[ "$#" -ne 2 ]]; then
-            echo "--mode requires COMM or FLASH" >&2
-            return 2
+    local requested_device=""
+    while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+            --mode)
+                if [[ "$#" -lt 2 || -z "$2" ]]; then
+                    echo "--mode requires COMM or FLASH" >&2
+                    return 2
+                fi
+                startup_mode="${2^^}"
+                if [[ "$startup_mode" != "COMM" && "$startup_mode" != "FLASH" ]]; then
+                    echo "Unsupported startup mode '$2'; use COMM or FLASH" >&2
+                    return 2
+                fi
+                shift 2
+                ;;
+            --usb-device)
+                if [[ "$#" -lt 2 || -z "$2" ]]; then
+                    echo "--usb-device requires an Android USB device path" >&2
+                    return 2
+                fi
+                requested_device="$2"
+                shift 2
+                ;;
+            *)
+                echo "Usage: andruino-flash startup [--usb-device PATH] [--mode COMM|FLASH]" >&2
+                return 2
+                ;;
+        esac
+    done
+
+    usb_device_path="$requested_device"
+    if [[ -z "$usb_device_path" ]]; then
+        new_request_context
+        service_action="devices"
+        run_avrdude
+
+        mapfile -t master_paths < <(awk '
+            /USB_DEVICE path=/ {
+                for (i = 1; i <= NF; ++i) if ($i ~ /^path=/) { sub(/^path=/, "", $i); print $i }
+            }
+        ' "$result_file")
+        if [[ "${#master_paths[@]}" -eq 0 ]]; then
+            echo "No supported USB serial master was discovered; pass --usb-device PATH" >&2
+            return 1
         fi
-        startup_mode="${2^^}"
-        if [[ "$startup_mode" != "COMM" && "$startup_mode" != "FLASH" ]]; then
-            echo "Unsupported startup mode '$2'; use COMM or FLASH" >&2
-            return 2
+        if [[ "${#master_paths[@]}" -gt 1 ]]; then
+            echo "Multiple USB serial devices were discovered: ${master_paths[*]}" >&2
+            echo "Disconnect all but the master or pass --usb-device PATH" >&2
+            return 1
         fi
-    elif [[ "$#" -ne 0 ]]; then
-        echo "Usage: andruino-flash startup [--mode COMM|FLASH]" >&2
-        return 2
+        usb_device_path="${master_paths[0]}"
     fi
 
-    new_request_context
-    service_action="devices"
-    usb_device_path=""
-    run_avrdude
-
-    mapfile -t uno_paths < <(awk '
-        /USB_DEVICE path=/ && tolower($0) ~ /vid=1a86/ && tolower($0) ~ /pid=7523/ {
-            for (i = 1; i <= NF; ++i) if ($i ~ /^path=/) { sub(/^path=/, "", $i); print $i }
-        }
-    ' "$result_file")
-    if [[ "${#uno_paths[@]}" -eq 0 ]]; then
-        echo "No supported Uno USB serial device was discovered (expected VID 1a86/PID 7523)" >&2
-        return 1
-    fi
-    if [[ "${#uno_paths[@]}" -gt 1 ]]; then
-        echo "Multiple Uno USB serial devices were discovered: ${uno_paths[*]}" >&2
-        echo "Disconnect all but the Uno, or use the existing bus --usb-device PATH commands" >&2
-        return 1
-    fi
-
-    usb_device_path="${uno_paths[0]}"
     new_request_context
     service_action="bus"
     bus_command="DISCOVER"
@@ -258,6 +303,12 @@ flash_platform() {
             return 2
             ;;
     esac
+    if [[ "$platform" == "attiny1614" && -n "$updi_node" ]]; then
+        run_bus_request "MODE FLASH" || return $?
+        run_bus_request "SELECT $updi_node" || return $?
+    fi
+    new_request_context
+    service_action="run"
     run_avrdude
 }
 
@@ -338,7 +389,14 @@ case "$action" in
             build_all_sketches
         else
             for sketch in "$@"; do
-                build_sketch_dir "$(sketch_dir_for "$sketch")" "$requested_platform"
+                sketch_dir="$(sketch_dir_for "$sketch")"
+                if [[ -n "$requested_platform" ]]; then
+                    platform="$requested_platform"
+                else
+                    platform="$(platform_for_sketch_dir "$sketch_dir")"
+                fi
+                source_dir="$(master_source_for_sketch_dir "$sketch_dir")"
+                build_sketch_dir "$source_dir" "$platform" "$sketch_dir"
             done
         fi
         exit $?
@@ -346,6 +404,7 @@ case "$action" in
     flash-sketch)
         shift
         requested_platform=""
+        requested_node=""
         sketch=""
         while [[ "$#" -gt 0 ]]; do
             case "$1" in
@@ -355,6 +414,14 @@ case "$action" in
                         exit 2
                     fi
                     requested_platform="$2"
+                    shift 2
+                    ;;
+                --node)
+                    if [[ "$#" -lt 2 || ! "$2" =~ ^[1-7]$ ]]; then
+                        echo "--node requires an address from 1 through 7" >&2
+                        exit 2
+                    fi
+                    requested_node="$2"
                     shift 2
                     ;;
                 --usb-device)
@@ -396,22 +463,48 @@ case "$action" in
         else
             platform="$(platform_for_sketch_dir "$sketch_dir")"
         fi
-        build_sketch_dir "$sketch_dir" "$platform"
+        if [[ "$platform" == "attiny1614" ]]; then
+            updi_node="$requested_node"
+        elif [[ -n "$requested_node" ]]; then
+            echo "--node can only be used when flashing an ATtiny1614 sketch" >&2
+            exit 2
+        fi
+        source_dir="$(master_source_for_sketch_dir "$sketch_dir")"
+        build_sketch_dir "$source_dir" "$platform" "$sketch_dir"
         flash_platform "$platform" "$sketch_dir/$(basename -- "$sketch_dir").ino.hex"
         exit $?
         ;;
     flash-platform)
         shift
-        if [[ "${1:-}" == "--usb-device" ]]; then
-            if [[ "$#" -lt 2 || -z "$2" ]]; then
-                echo "--usb-device requires an Android USB device path" >&2
-                exit 2
-            fi
-            usb_device_path="$2"
-            shift 2
-        fi
+        while [[ "$#" -gt 0 ]]; do
+            case "$1" in
+                --usb-device)
+                    if [[ "$#" -lt 2 || -z "$2" ]]; then
+                        echo "--usb-device requires an Android USB device path" >&2
+                        exit 2
+                    fi
+                    usb_device_path="$2"
+                    shift 2
+                    ;;
+                --node)
+                    if [[ "$#" -lt 2 || ! "$2" =~ ^[1-7]$ ]]; then
+                        echo "--node requires an address from 1 through 7" >&2
+                        exit 2
+                    fi
+                    updi_node="$2"
+                    shift 2
+                    ;;
+                *)
+                    break
+                    ;;
+            esac
+        done
         if [[ "$#" -ne 2 ]]; then
             echo "$usage" >&2
+            exit 2
+        fi
+        if [[ -n "$updi_node" && "$1" != "attiny1614" ]]; then
+            echo "--node can only be used when flashing an ATtiny1614" >&2
             exit 2
         fi
         flash_platform "$1" "$2"

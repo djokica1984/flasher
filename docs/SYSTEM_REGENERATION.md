@@ -1,6 +1,6 @@
 # Andruino complete system regeneration guide
 
-This document describes the complete tested architecture and the source layout needed to recreate the Uno/JTAG2UPDI control-bus system and the ATtiny1614 sketches from scratch.
+This document describes the complete tested architecture and the source layout needed to recreate the Uno/Nano JTAG2UPDI control-bus system and the ATtiny1614 sketches from scratch.
 
 > Verified state: Nodes 1 through 7 use the same address library and were rebuilt with the seven-node control-bus implementation. All seven nodes returned `PONG` in the final all-node verification. Reproduce the system from this source before diagnosing a no-response node.
 
@@ -14,10 +14,10 @@ The system has three independent communication layers:
    - AVRDUDE uses `-P COM` with the Android USB transport.
    - AVRDUDE talks to Uno or Nano firmware that implements a programmer protocol.
 
-2. **Uno/JTAG2UPDI programmer firmware**
-   - Uno is flashed with an extended JTAG2UPDI implementation.
+2. **Uno/Nano JTAG2UPDI programmer firmware**
+   - Either master is flashed with the same extended JTAG2UPDI implementation.
    - D6 is used by JTAG2UPDI for UPDI signaling.
-   - USB host/AVRDUDE connects at the Uno's normal serial rate.
+   - The Nano old-bootloader profile changes the master upload baud; it does not change the firmware source or bus wiring.
    - D5 is added as a half-duplex 2400-baud node control bus.
 
 3. **ATtiny1614 node firmware**
@@ -32,11 +32,16 @@ The system has three independent communication layers:
 andruino/
   uno/
     jtag2updi/
-      jtag2updi.cpp             Uno/JTAG2UPDI main loop
+      jtag2updi.cpp             Canonical Uno/Nano JTAG2UPDI main loop
       control_bus.cpp            D5 node control protocol
       control_bus.h
       JTAG2.cpp                  Modified to recognize control-bus commands
       [other upstream JTAG2UPDI files]
+    Blink300/
+      Blink300.ino
+    Blink3000/
+      Blink3000.ino
+  nano/
     Blink300/
       Blink300.ino
     Blink3000/
@@ -64,14 +69,13 @@ andruino/
       AndruinoBusNode/
         library.properties
         src/attiny_bus_node.h
-  nano/
-    Blink300/
-      Blink300.ino
-    Blink3000/
-      Blink3000.ino
 tools/andruino-flash              Termux build and service wrapper
 docs/REPRODUCING.md               Installation and flashing procedure
 ```
+
+`andruino-flash` compiles the canonical `uno/jtag2updi` source with the
+requested Uno or Nano profile; the Nano folder path is retained as a
+compatibility alias.
 
 ## 2. Programming and control hardware
 
@@ -89,31 +93,33 @@ docs/REPRODUCING.md               Installation and flashing procedure
 
 ### Direct UPDI flashing
 
-At the Uno:
+At either master:
 
 ```text
-Uno D6  -> ATtiny PA0/UPDI, physical pin 10
-Uno 5V  -> ATtiny VDD, physical pin 1
-Uno GND -> ATtiny GND, physical pin 14
+Master D6  -> ATtiny PA0/UPDI, physical pin 10
+Master 5V  -> ATtiny VDD, physical pin 1
+Master GND -> ATtiny GND, physical pin 14
 ```
 
-Connect only one ATtiny UPDI target at a time. Keeping D6 connected while flashing a different Uno firmware can prevent correct Uno write verification. Disconnect Uno D5 and D6 completely before flashing the Uno itself.
+Connect only one ATtiny UPDI target at a time. Disconnect master D5 and D6 before flashing the master itself.
 
 ### Shared node control bus
 
 ```text
-Uno D5 -> Node PB3, physical pin 6, through separate 1 kOhm resistor
-Uno D5 -> Node PB2, physical pin 7, through separate 1 kOhm resistor
-Uno GND -> Node GND, physical pin 14
-Uno 5V  -> Node VDD, physical pin 1
+Master D5 -> Node PB3, physical pin 6, through separate 1 kOhm resistor
+Master D5 -> Node PB2, physical pin 7, through separate 1 kOhm resistor
+Master GND -> Node GND, physical pin 14
+Master 5V  -> Node VDD, physical pin 1
 PB0 on each node remains available as the selection/output signal
 ```
 
-Repeat the two 1 kOhm bus branches for each additional node. All nodes share Uno D5 and a common ground. The bus is half duplex: the Uno sends addressed commands, then releases D5, allowing one addressed node to transmit a response.
+Repeat the two 1 kOhm bus branches for each additional node. All nodes share master D5 and a common ground. The bus is half duplex: the master sends addressed commands, then releases D5, allowing one addressed node to transmit a response.
 
-## 3. Uno JTAG2UPDI firmware
+## 3. Shared Uno/Nano JTAG2UPDI firmware
 
-Use the repository's complete `andruino/uno/jtag2updi` directory. Do not replace the directory with an unmodified upstream copy because the copied source contains the `control_bus` integration.
+Use the repository's complete `andruino/uno/jtag2updi` directory as the
+canonical source for either master. Do not replace it with an unmodified
+upstream copy because this source contains the `control_bus` integration.
 
 ### Required control-bus integration
 
@@ -129,7 +135,7 @@ const uint8_t REQUEST_ATTEMPTS = 3;
 const uint8_t RETRY_DELAY_MS = 20;
 ```
 
-The Uno side uses `SoftwareSerial(BUS_PIN, BUS_PIN)` on D5. In setup, initialize the control bus after the normal JTAG2UPDI links have been initialized:
+Both master profiles use `SoftwareSerial(BUS_PIN, BUS_PIN)` on D5. In setup, initialize the control bus after the normal JTAG2UPDI links have been initialized:
 
 ```cpp
 JICE_io::init();
@@ -146,7 +152,7 @@ if (firstByte == '@') {
 }
 ```
 
-This is the modification to the Uno receive loop in `JTAG2.cpp`.
+This is the modification to the shared master receive loop in `JTAG2.cpp`.
 
 ### Host protocol
 
@@ -163,17 +169,17 @@ Android sends the host command in this form at 19200 baud:
 @BLINK 1 200
 ```
 
-The Uno replies with exactly one ASCII line and CR/LF termination. Examples:
+The master replies with exactly one ASCII line and CR/LF termination. Examples:
 
 ```text
 NODE 1 PONG
 OK NODES 1,2
-OK MODE COMM; NODES 1,2,3 MODE COMM; SELECT NONE
+OK MODE COMM; NODES 1,2,3,4,5,6,7 MODE COMM; SELECT NONE
 ```
 
-`DISCOVER` is the only authoritative active-node result. The `MODE COMM` response text is intentionally formatted for the complete system and can print all three logical node numbers even when discovery has not found them.
+`DISCOVER` is the only authoritative active-node result. The `MODE COMM` response text is intentionally formatted for the complete system and can print all seven logical node numbers even when discovery has not found them.
 
-### Uno D5 command transmission
+### Master D5 command transmission
 
 Every node command has the form `<address> <command>`:
 
@@ -184,7 +190,7 @@ Every node command has the form `<address> <command>`:
 2 BLINK 200
 ```
 
-Before writing, D5 is released during the receive window. During a transmission, it is driven high and SoftwareSerial prints the command. The Uno waits for a response beginning with `NODE <address> `. A response for another address is ignored. It permits three attempts with a 20 ms retry delay.
+Before writing, D5 is released during the receive window. During a transmission, it is driven high and SoftwareSerial prints the command. The master waits for a response beginning with `NODE <address> `. A response for another address is ignored. It permits three attempts with a 20 ms retry delay.
 
 ## 4. ATtiny1614 node firmware library
 
@@ -231,10 +237,10 @@ Supported commands are:
 |---|---|---|
 | PING | `2 PING` | Returns `NODE 2 PONG` |
 | VERSION | `1 VERSION` | Returns firmware/version identifier |
-| STATUS | `1 STATUS` | Returns mode, blink, selection, LED state |
+| STATUS | `1 STATUS` | Returns compact mode, valve, motor, LED, and UPDI state fields |
 | MODE COMM | `2 MODE COMM` | Communication mode and persistent EEPROM state |
 | MODE FLASH | `2 MODE FLASH` | UPDI-flashing mode and persistent EEPROM state |
-| SELECT | `1 SELECT 2` | Selects logical Node 1/2/3 and updates selection |
+| SELECT | `1 SELECT 2` | Selects a logical node address from 1 through 7 |
 | BLINK | `2 BLINK 200` | Sets allowed COMM blink interval to 200 or 1000 ms |
 
 Before transmitting, the node delays 10 ms. It temporarily enables the hardware USART TX, prints the response, flushes it, disables TX, and returns PB2 to input mode. This prevents simultaneous node transmission.
@@ -301,14 +307,17 @@ arduino:avr:uno 1.8.8
 megaTinyCore:megaavr:2.6.11
 ```
 
-Uno:
+The same master source is compiled with the selected board profile:
 
 ```sh
-arduino-cli compile \
-  --fqbn arduino:avr:uno \
-  --output-dir /tmp/build \
-  jtag2updi
+andruino-flash build --platform uno "$ROOT/uno/jtag2updi"
+andruino-flash build --platform nano "$ROOT/uno/jtag2updi"
 ```
+
+Uno uses `arduino:avr:uno` and 115200 baud for its standard bootloader.
+Classic Nano uses `arduino:avr:nano:cpu=atmega328old` and 57600 baud for its
+old bootloader. These are upload-profile differences; the sketch and D5/D6
+wiring are the same.
 
 The ATtiny FQBN must include the exact tested options:
 
@@ -331,18 +340,21 @@ For the shell build helper, use:
 andruino-flash build --platform attiny1614 /storage/emulated/0/Download/andruino/attiny1614/BlinkNode1/BlinkNode1.ino
 ```
 
-## 7. UNO flashing and validity requirement
+## 7. Master flashing and validity requirement
 
-First disconnect D5/D6 and all node wiring. Build and flash the Uno sketch:
+First disconnect D5/D6 and all node wiring. Choose the connected master and
+flash the canonical sketch with its matching profile:
 
 ```sh
+MASTER_PLATFORM=nano # use uno for an Uno
+MASTER_USB=/dev/bus/usb/001/009
 andruino-flash flash-sketch \
-  --platform uno \
-  --usb-device "$UNO_USB" \
+  --platform "$MASTER_PLATFORM" \
+  --usb-device "$MASTER_USB" \
   /storage/emulated/0/Download/andruino/uno/jtag2updi/jtag2updi.ino
 ```
 
-A valid Uno result must include all of the following:
+A valid master result must include all of the following:
 
 ```text
 Writing | ################################################## | 100%
@@ -354,7 +366,7 @@ RESULT success
 
 A config-file warning from AVRDUDE is not enough by itself to declare success. Writing and reading must reach 100% and the completion line must be present.
 
-Reconnect the control bus only after Uno flashing is complete. Do not reconnect the target UPDI wire until direct target flashing begins.
+Reconnect the D5 control bus only after master flashing is complete. Connect D6 to the target UPDI only for direct target flashing; disconnect it for normal D5 bus operation.
 
 ## 8. Direct ATtiny flashing
 

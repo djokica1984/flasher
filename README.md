@@ -16,7 +16,9 @@ electrically and protocol-compatible with the board.
 
 For the complete from-scratch guide—including Android installation, Termux
 and Arduino CLI setup, USB selection, and Uno/Nano/ATtiny1614 flashing steps—
-see [docs/REPRODUCING.md](docs/REPRODUCING.md).
+see [docs/REPRODUCING.md](docs/REPRODUCING.md). The exact tested toolchain,
+firmware fingerprints, and current Uno/Nano test outcomes are recorded in
+[docs/VERIFIED_BASELINE.md](docs/VERIFIED_BASELINE.md).
 
 ## Build
 
@@ -114,9 +116,9 @@ andruino-flash flash-sketch --platform uno --usb-device "$UNO_USB" \
 andruino-flash flash-sketch --platform attiny1614 --usb-device "$UNO_USB" \
   "$ROOT/attiny1614/Blink1000/Blink1000.ino"
 
-# Nano's ATtiny: flash programmer to Nano, then flash target through Nano.
+# Nano's ATtiny: use the same master sketch source with the Nano profile.
 andruino-flash flash-sketch --platform nano --usb-device "$NANO_USB" \
-  "$ROOT/nano/jtag2updi/jtag2updi.ino"
+  "$ROOT/uno/jtag2updi/jtag2updi.ino"
 andruino-flash flash-sketch --platform attiny1614 --usb-device "$NANO_USB" \
   "$ROOT/attiny1614/Blink1000/Blink1000.ino"
 
@@ -130,16 +132,20 @@ andruino-flash flash-platform --usb-device "$UNO_USB" uno \
 andruino-flash flash-platform --usb-device "$UNO_USB" attiny1614 \
   "$ROOT/attiny1614/Blink1000/Blink1000.ino.hex"
 andruino-flash flash-platform --usb-device "$NANO_USB" nano \
-  "$ROOT/nano/jtag2updi/jtag2updi.ino.hex"
+  "$ROOT/uno/jtag2updi/jtag2updi.ino.hex"
 andruino-flash flash-platform --usb-device "$NANO_USB" attiny1614 \
   "$ROOT/attiny1614/Blink1000/Blink1000.ino.hex"
 ```
 
-### Uno control bus
+### Uno/Nano control bus
 
-The optional Uno JTAG2UPDI build supports up to three addressed ATtiny1614
-nodes on a half-duplex bus. After installing the modified Uno and node firmware, issue
-commands through the Uno's explicit USB path:
+The shared JTAG2UPDI master source is buildable for Uno and Nano and is designed
+for up to seven addressed ATtiny1614 nodes on the same D5 half-duplex bus.
+The complete bus test is verified on Uno. The Nano image was compiled and
+flash-verified, but currently does not communicate with the nodes; see the
+[verified baseline](docs/VERIFIED_BASELINE.md) before treating Nano as working.
+The Android app uses the USB path and AVRDUDE arguments supplied by the CLI and
+does not need to know which master board is connected.
 
 ```sh
 andruino-flash bus --usb-device "$UNO_USB" PING 1
@@ -150,14 +156,12 @@ andruino-flash bus --usb-device "$UNO_USB" SELECT 1
 andruino-flash bus --usb-device "$UNO_USB" MODE COMM
 ```
 
-`MODE FLASH` and `MODE COMM` set the system-wide state on the Uno and every
-configured node. `SELECT 1`, `SELECT 2`, or
-`SELECT 3` sends the target ID to every configured node; each node records
+`MODE FLASH` and `MODE COMM` set the system-wide state on the master and every
+configured node. `SELECT 1` through `SELECT 7` sends the target ID to every configured node; each node records
 whether it is selected without changing its mode. These
 software states do **not** electrically isolate either UPDI pin or select the
 physical UPDI connection. Continue manually switching UPDI to the target being
-programmed. Enter system-wide `MODE FLASH`, use `SELECT 1`, `SELECT 2`, or
-`SELECT 3` to record the intended target at every node, and use `MODE COMM` to
+programmed. Enter system-wide `MODE FLASH`, use `SELECT 1` through `SELECT 7` to record the intended target at every node, and use `MODE COMM` to
 leave flashing mode. In FLASH mode the selected node's LED is solid ON and
 the other nodes' LEDs are OFF; in COMM mode each node retains its configured
 blink behavior.
@@ -170,7 +174,7 @@ PB0 is HIGH while PA5 is LOW (LED lit), and PB0 is LOW while PA5 is HIGH (LED of
 Use PB0 only as a logic signal for a
 high-impedance input, not directly on the UPDI bus.
 Mode and selection state persist across resets in EEPROM. See the
-[control-bus wiring and complete command reference](docs/REPRODUCING.md#8-uno-control-bus-for-up-to-three-attiny1614-nodes).
+[control-bus wiring and complete command reference](docs/REPRODUCING.md#8-uno-nano-control-bus-for-seven-attiny1614-nodes).
 
 The Uno profile uses the Arduino bootloader at 115200 baud. The Nano profile
 uses the old bootloader at 57600 baud. The ATtiny1614 profile uses JTAG2UPDI at

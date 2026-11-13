@@ -96,11 +96,12 @@ void sendStatus() {
   delay(BUS_TURNAROUND_MS);
   startTransmit();
   Serial.print(F("NODE ")); Serial.print(NODE_ADDRESS);
-  Serial.print(F(" STATUS MODE ")); Serial.print(nodeMode == NODE_COMM ? F("COMM") : F("FLASH"));
-  Serial.print(F(" VALVE ")); Serial.print(valveOn ? F("ON") : F("OFF"));
-  Serial.print(F(" MOTOR ")); Serial.print(motorForward ? F("FORWARD") : motorReverse ? F("REVERSE") : F("OFF"));
-  Serial.print(F(" LED ")); Serial.print(nodeLedOn() ? F("ON") : F("OFF"));
-  Serial.print(F(" UPDI ")); Serial.println(digitalRead(FLASH_SELECT_PIN) == LOW ? F("ENABLED") : F("DISABLED"));
+  Serial.print(F(" STATUS "));
+  Serial.print(nodeMode == NODE_COMM ? F("COMM") : F("FLASH"));
+  Serial.print(F(" V=")); Serial.print(valveOn ? F("ON") : F("OFF"));
+  Serial.print(F(" M=")); Serial.print(motorForward ? F("FORWARD") : motorReverse ? F("REVERSE") : F("OFF"));
+  Serial.print(F(" L=")); Serial.print(nodeLedOn() ? F("ON") : F("OFF"));
+  Serial.print(F(" U=")); Serial.println(digitalRead(FLASH_SELECT_PIN) == LOW ? F("ON") : F("OFF"));
   Serial.flush();
   releaseBus();
 }

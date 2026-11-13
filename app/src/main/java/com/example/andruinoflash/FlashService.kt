@@ -76,7 +76,8 @@ class FlashService : Service() {
                         runAvrdude(
                             reporter,
                             decodeArguments(encodedArgs),
-                            intent?.getStringExtra(EXTRA_USB_DEVICE)
+                            intent?.getStringExtra(EXTRA_USB_DEVICE),
+                            intent?.getIntExtra(EXTRA_UPDI_NODE, 0) ?: 0
                         )
                     }
                     else -> throw IllegalArgumentException(
@@ -196,12 +197,14 @@ class FlashService : Service() {
                 UsbSerialPort.PARITY_NONE
             )
             // JTAG2UPDI returns to its 19200-baud idle rate after host timeout.
-            // Do not toggle DTR here: that would reset the Uno and discard node mode.
+            // Do not toggle DTR here: that would reset the master and discard node mode.
             Thread.sleep(CONTROL_IDLE_SETTLE_MS)
 
             val payload = "@$command\n".toByteArray(Charsets.US_ASCII)
             port.write(payload, CONTROL_IO_TIMEOUT_MS)
-            val response = readControlResponse(port)
+            val response = readControlResponse(port) { candidate ->
+                isExpectedBusResponse(command, candidate)
+            }
             reporter.info(
                 "USB=${device.deviceName} VID=${device.vendorId.toString(16)} " +
                     "PID=${device.productId.toString(16)}"
@@ -217,7 +220,10 @@ class FlashService : Service() {
         }
     }
 
-    private fun setUpdiGate(port: UsbSerialPort, enabled: Boolean) {
+    private fun setUpdiGate(port: UsbSerialPort, enabled: Boolean, nodeAddress: Int) {
+        if (nodeAddress !in 1..7) {
+            throw IllegalArgumentException("UPDI node address must be from 1 through 7")
+        }
         port.setParameters(
             CONTROL_BAUD_RATE,
             8,
@@ -225,15 +231,35 @@ class FlashService : Service() {
             UsbSerialPort.PARITY_NONE
         )
         Thread.sleep(CONTROL_IDLE_SETTLE_MS)
-        // FLASH-SKETCH currently targets Node 1; addressed UPDI isolation is explicit.
-        port.write("@UPDI ${if (enabled) "ENABLE" else "DISABLE"} 1\n".toByteArray(Charsets.US_ASCII), CONTROL_IO_TIMEOUT_MS)
+        port.write(
+            "@UPDI ${if (enabled) "ENABLE" else "DISABLE"} $nodeAddress\n"
+                .toByteArray(Charsets.US_ASCII),
+            CONTROL_IO_TIMEOUT_MS
+        )
         val response = readControlResponse(port)
-        if (response != if (enabled) "OK UPDI ENABLED" else "OK UPDI DISABLED") {
-            throw IOException("Uno UPDI gate command failed: $response")
+        val expectedResponse =
+            if (enabled) "NODE $nodeAddress UPDI ENABLED" else "NODE $nodeAddress UPDI DISABLED"
+        if (response != expectedResponse) {
+            throw IOException("Master UPDI gate command failed: $response")
         }
     }
 
-    private fun restoreControlBusState(reporter: RunReporter, port: UsbSerialPort) {
+    private fun resetJtag2updiMaster(port: UsbSerialPort) {
+        port.setDTR(false)
+        Thread.sleep(250)
+        port.setDTR(true)
+        Thread.sleep(100)
+        port.setDTR(false)
+        port.setParameters(
+            CONTROL_BAUD_RATE,
+            8,
+            UsbSerialPort.STOPBITS_1,
+            UsbSerialPort.PARITY_NONE
+        )
+        Thread.sleep(JTAG2UPDI_SETTLE_MS)
+    }
+
+    private fun restoreControlBusState(reporter: RunReporter, port: UsbSerialPort): Int? {
         port.setParameters(
             CONTROL_BAUD_RATE,
             8,
@@ -245,21 +271,64 @@ class FlashService : Service() {
         val response = readControlResponse(port)
         reporter.info("BUS_RESTORE_RESPONSE $response")
         if (response.startsWith("ERR ")) {
-            throw IOException("Uno control-bus RESTORE failed: $response")
+            throw IOException("Master control-bus RESTORE failed: $response")
         }
         if (!response.contains("OK MODE ")) {
-            throw IOException("Uno control-bus RESTORE returned an unexpected state: $response")
+            throw IOException("Master control-bus RESTORE returned an unexpected state: $response")
         }
         if (!response.contains("SELECT NONE") && !response.contains("SELECT NODE ")) {
-            throw IOException("Uno control-bus RESTORE returned an unexpected selection: $response")
+            throw IOException("Master control-bus RESTORE returned an unexpected selection: $response")
         }
         Thread.sleep(JTAG2UPDI_SETTLE_MS)
+        return Regex("SELECT NODE ([1-7])$").find(response)?.groupValues?.get(1)?.toInt()
     }
 
-    private fun readControlResponse(port: UsbSerialPort): String {
+    private fun isExpectedBusResponse(command: String, response: String): Boolean {
+        val tokens = command.uppercase().split(Regex("\\s+"))
+        return when (tokens.firstOrNull()) {
+            "DISCOVER" -> DISCOVER_RESPONSE_PATTERN.matches(response)
+            "MODE" -> tokens.size == 2 && response.startsWith("OK MODE ${tokens[1]};")
+            "SELECT" -> tokens.size == 2 &&
+                response.startsWith("OK SELECT NODE ${tokens[1]}; SYSTEM MODE ")
+            "UPDI" -> tokens.size == 3 &&
+                response == "NODE ${tokens[2]} UPDI ${if (tokens[1] == "ENABLE") "ENABLED" else "DISABLED"}"
+            "PING", "STATUS", "VERSION", "STOP", "READ_ENCODER", "RESET_ENCODER",
+            "MOTION_STATUS", "ANGLE", "BLINK", "LED", "VALVE", "MOTOR" -> {
+                val node = tokens.getOrNull(1)?.toIntOrNull() ?: return false
+                val payload = response.removePrefix("NODE $node ")
+                if (payload == response) return false
+                when (tokens[0]) {
+                    "PING" -> payload == "PONG"
+                    "STATUS" -> NODE_STATUS_RESPONSE_PATTERN.matches(response)
+                    "VERSION" -> payload.startsWith("VERSION ")
+                    "STOP" -> payload.startsWith("STOPPED ")
+                    "READ_ENCODER", "RESET_ENCODER" -> payload.startsWith("ENCODER ")
+                    "MOTION_STATUS" -> payload.startsWith("MOTION ")
+                    "ANGLE" -> payload.startsWith("ANGLE ")
+                    "BLINK" -> tokens.getOrNull(2)?.toIntOrNull()?.let { payload == "BLINK $it" } == true
+                    "LED", "VALVE" -> tokens.size == 3 && payload == "${tokens[0]} ${tokens[2]}"
+                    "MOTOR" -> when (tokens.getOrNull(2)) {
+                        "OFF" -> payload == "MOTOR OFF"
+                        "FORWARD", "REVERSE" -> tokens.getOrNull(3)?.toIntOrNull()?.let {
+                            payload == "MOTOR ${tokens[2]} STARTED MS $it"
+                        } == true
+                        else -> false
+                    }
+                    else -> false
+                }
+            }
+            else -> false
+        }
+    }
+
+    private fun readControlResponse(
+        port: UsbSerialPort,
+        expectedResponse: ((String) -> Boolean)? = null
+    ): String {
         val response = ByteArrayOutputStream()
         val buffer = ByteArray(32)
         val deadline = SystemClock.elapsedRealtime() + CONTROL_RESPONSE_TIMEOUT_MS
+        var lastUnexpectedResponse: String? = null
         while (SystemClock.elapsedRealtime() < deadline) {
             val remaining = (deadline - SystemClock.elapsedRealtime()).coerceAtLeast(1)
             val count = port.read(buffer, minOf(CONTROL_IO_TIMEOUT_MS.toLong(), remaining).toInt())
@@ -267,21 +336,34 @@ class FlashService : Service() {
                 val character = buffer[index]
                 if (character == '\n'.code.toByte()) {
                     val line = response.toString(Charsets.US_ASCII.name()).trim()
-                    if (line.isNotEmpty()) return line
-                    throw IOException("Uno returned an empty control-bus response")
+                    if (line.isEmpty()) {
+                        throw IOException("Master returned an empty control-bus response")
+                    }
+                    if (expectedResponse == null || line.startsWith("ERR ") || expectedResponse(line)) {
+                        return line
+                    }
+                    lastUnexpectedResponse = line
+                    response.reset()
+                    continue
                 }
                 if (character != '\r'.code.toByte()) {
                     val unsigned = character.toInt() and 0xff
                     if (unsigned < 0x20 || unsigned > 0x7e) continue
                     if (response.size() >= MAX_CONTROL_RESPONSE_LENGTH) {
-                        throw IOException("Uno control-bus response exceeded the size limit")
+                        throw IOException("Master control-bus response exceeded the size limit")
                     }
                     response.write(unsigned)
                 }
             }
         }
+        if (lastUnexpectedResponse != null) {
+            throw IOException(
+                "Timed out waiting for a response matching the bus command; " +
+                    "last unrelated response: $lastUnexpectedResponse"
+            )
+        }
         throw IOException(
-            "Timed out waiting for the Uno control-bus response. " +
+            "Timed out waiting for the master control-bus response. " +
                 "Confirm JTAG2UPDI with control-bus support is installed."
         )
     }
@@ -289,7 +371,8 @@ class FlashService : Service() {
     private fun runAvrdude(
         reporter: RunReporter,
         avrdudeArgs: List<String>,
-        requestedDeviceName: String?
+        requestedDeviceName: String?,
+        updiNode: Int
     ) {
         val requestId = reporter.requestId
         val usbManager = getSystemService(USB_SERVICE) as UsbManager
@@ -323,6 +406,10 @@ class FlashService : Service() {
         if (baudRate <= 0) {
             throw IllegalArgumentException("AVRDUDE baud rate must be positive")
         }
+        val usesJtag2updi = findOptionValue(avrdudeArgs, "-c") == "jtag2updi"
+        if (usesJtag2updi && updiNode !in 0..7) {
+            throw IllegalArgumentException("UPDI node address must be 0 (use selection) or from 1 through 7")
+        }
 
         obtainUsbPermission(usbManager, device)
         val connection = usbManager.openDevice(device)
@@ -335,19 +422,30 @@ class FlashService : Service() {
         val serial = SerialSession(connection, port)
         try {
             port.open(connection)
-            port.setParameters(baudRate, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
-            port.setDTR(false)
-            Thread.sleep(250)
-            port.setDTR(true)
-            Thread.sleep(100)
-            port.setDTR(false)
-            Thread.sleep(JTAG2UPDI_SETTLE_MS)
+            if (usesJtag2updi) {
+                port.setParameters(
+                    CONTROL_BAUD_RATE,
+                    8,
+                    UsbSerialPort.STOPBITS_1,
+                    UsbSerialPort.PARITY_NONE
+                )
+                reporter.info("USB_RESET skipped to preserve the running JTAG2UPDI master")
+            } else {
+                port.setParameters(baudRate, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
+                port.setDTR(false)
+                Thread.sleep(250)
+                port.setDTR(true)
+                Thread.sleep(100)
+                port.setDTR(false)
+                Thread.sleep(JTAG2UPDI_SETTLE_MS)
+            }
         } catch (error: Exception) {
             serial.close()
             throw error
         }
 
         var updiGateEnabled = false
+        var updiGateNode = updiNode
         try {
             val avrdude = File(applicationInfo.nativeLibraryDir, "libavrdude.so")
             if (!avrdude.canExecute()) {
@@ -377,34 +475,50 @@ class FlashService : Service() {
                     "in=0x${inputEndpoint.toString(16)} out=0x${outputEndpoint.toString(16)}"
             )
             reporter.info("COMMAND ${args.drop(1).joinToString(" ") { shellQuote(it) }}")
-            if (findOptionValue(avrdudeArgs, "-c") == "jtag2updi") {
-                reporter.info("BUS_PREP restoring Uno-persisted mode and selection before AVRDUDE")
+            if (usesJtag2updi) {
+                reporter.info("BUS_PREP attempting control-bus synchronization")
                 try {
-                    restoreControlBusState(reporter, port)
-                } catch (error: IOException) {
-                    reporter.info("BUS_PREP_WARN direct UPDI continues because Uno control bus is unavailable: ${error.message}")
-                }
-                try {
-                    setUpdiGate(port, enabled = true)
+                    val selectedNode = restoreControlBusState(reporter, port)
+                    val targetNode = when {
+                        updiNode == 0 && selectedNode != null -> selectedNode
+                        updiNode in 1..7 && selectedNode == updiNode -> updiNode
+                        updiNode in 1..7 -> throw IllegalArgumentException(
+                            "Selected UPDI node ${selectedNode ?: "none"} does not match requested node $updiNode"
+                        )
+                        else -> throw IllegalArgumentException(
+                            "No UPDI node is selected; issue MODE FLASH and SELECT <node> before flashing"
+                        )
+                    }
+                    updiGateNode = targetNode
+                    setUpdiGate(port, enabled = true, nodeAddress = updiGateNode)
                     updiGateEnabled = true
+                    reporter.info("BUS_PREP control-bus synchronization succeeded")
                 } catch (error: IOException) {
-                    reporter.info("BUS_PREP_WARN UPDI gate control unavailable; continuing with externally enabled UPDI: ${error.message}")
+                    reporter.info("BUS_PREP_INFO direct UPDI mode active (control bus inactive or node wired directly to D6): ${error.message}")
+                } finally {
+                    port.setParameters(baudRate, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
+                    Thread.sleep(JTAG2UPDI_SETTLE_MS)
                 }
-                port.setParameters(baudRate, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
-                Thread.sleep(JTAG2UPDI_SETTLE_MS)
             }
-            val nativeResult = UsbAvrdudeNative.runAvrdude(
-                usbFileDescriptor,
-                inputEndpoint,
-                outputEndpoint,
-                device.vendorId == CH340_VENDOR_ID && device.productId == CH340_PRODUCT_ID,
-                args.toTypedArray()
-            )
+            val nativeResult = try {
+                UsbAvrdudeNative.runAvrdude(
+                    usbFileDescriptor,
+                    inputEndpoint,
+                    outputEndpoint,
+                    device.vendorId == CH340_VENDOR_ID && device.productId == CH340_PRODUCT_ID,
+                    args.toTypedArray()
+                )
+            } finally {
+                if (usesJtag2updi) {
+                    reporter.info("USB_RESET restoring the JTAG2UPDI master after AVRDUDE")
+                    resetJtag2updiMaster(port)
+                }
+            }
             val output = nativeResult.getOrNull(1)
                 ?: throw IOException("Native AVRDUDE runner returned no output")
             if (updiGateEnabled) {
                 try {
-                    setUpdiGate(port, enabled = true)
+                    setUpdiGate(port, enabled = true, nodeAddress = updiGateNode)
                 } catch (error: IOException) {
                     reporter.info("UPDI_GATE_WARN could not leave UPDI enabled after programming: ${error.message}")
                 }
@@ -417,12 +531,12 @@ class FlashService : Service() {
             }
             val exitCode = nativeResult.getOrNull(0)?.toIntOrNull()
                 ?: throw IOException("Native AVRDUDE runner returned an invalid exit code")
-            if (findOptionValue(avrdudeArgs, "-c") == "jtag2updi") {
-                reporter.info("BUS_RESTORE restoring Uno-persisted mode and selection after AVRDUDE")
+            if (usesJtag2updi) {
+                reporter.info("BUS_RESTORE restoring master-persisted mode and selection after AVRDUDE")
                 try {
                     restoreControlBusState(reporter, port)
                 } catch (error: IOException) {
-                    reporter.info("BUS_RESTORE_WARN Uno control bus remains unavailable: ${error.message}")
+                    reporter.info("BUS_RESTORE_WARN master control bus remains unavailable: ${error.message}")
                 }
             }
             if (exitCode != 0) {
@@ -432,9 +546,9 @@ class FlashService : Service() {
         } finally {
             if (updiGateEnabled) {
                 try {
-                    setUpdiGate(port, enabled = true)
-                } catch (_: Exception) {
-                    // Do not leave the post-flash UPDI path disabled if cleanup fails.
+                    setUpdiGate(port, enabled = true, nodeAddress = updiGateNode)
+                } catch (error: IOException) {
+                    reporter.info("UPDI_GATE_WARN could not restore UPDI after programming: ${error.message}")
                 }
             }
             serial.close()
@@ -630,6 +744,7 @@ class FlashService : Service() {
         const val EXTRA_AVRDUDE_ARGS = "avrdudeArgs"
         const val EXTRA_BUS_COMMAND = "busCommand"
         const val EXTRA_USB_DEVICE = "usbDevice"
+        const val EXTRA_UPDI_NODE = "updiNode"
         const val ACTION_RUN = "run"
         const val ACTION_DEVICES = "devices"
         const val ACTION_BUS = "bus"
@@ -643,9 +758,14 @@ class FlashService : Service() {
         private const val CONTROL_BAUD_RATE = 19200
         private const val CONTROL_IDLE_SETTLE_MS = 2500L
         private const val CONTROL_IO_TIMEOUT_MS = 500
-        private const val CONTROL_RESPONSE_TIMEOUT_MS = 10000L
-        private const val JTAG2UPDI_SETTLE_MS = 1200L
+        private const val CONTROL_RESPONSE_TIMEOUT_MS = 20000L
+        private const val JTAG2UPDI_SETTLE_MS = 4000L
         private const val MAX_CONTROL_RESPONSE_LENGTH = 120
+        private val DISCOVER_RESPONSE_PATTERN = Regex("OK NODES (NONE|[1-7](,[1-7])*)")
+        private val NODE_STATUS_RESPONSE_PATTERN = Regex(
+            "NODE [1-7] STATUS (COMM|FLASH) V=(ON|OFF) " +
+                "M=(OFF|FORWARD|REVERSE) L=(ON|OFF) U=(ON|OFF)"
+        )
         private val BUS_COMMAND_PATTERN = Regex(
             "(?i)(PING|STATUS|VERSION|STOP|READ_ENCODER|RESET_ENCODER|MOTION_STATUS|ANGLE) [1-7]|BLINK [1-7] [0-9]{2,5}|LED [1-7] (ON|OFF)|MODE (COMM|FLASH)|SELECT [1-7]|DISCOVER|UPDI (ENABLE|DISABLE) [1-7]|VALVE [1-7] (ON|OFF)|MOTOR [1-7] OFF|MOTOR [1-7] (FORWARD|REVERSE) ([1-9][0-9]{0,4})"
         )

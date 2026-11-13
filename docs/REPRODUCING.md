@@ -192,17 +192,18 @@ The committed samples include Blink300 and Blink3000 for Uno, Nano, and
 ATtiny1614. The earlier Blink1000/Blink200 examples are part of the existing
 phone sketch tree but are not required for this guide.
 
-### JTAG2UPDI firmware
+### Shared JTAG2UPDI firmware
 
-This repository includes the JTAG2UPDI source for the Uno at
-`andruino/uno/jtag2updi`, including the control-bus extension. Copying the
-repository's `andruino` folder as described above installs it at
-`$ROOT/uno/jtag2updi`; do not overwrite this Uno version with unmodified
-upstream source. To use JTAG2UPDI on a Nano, obtain the source from
-[ElTangas/jtag2updi](https://github.com/ElTangas/jtag2updi) and keep its
-Arduino sketch and supporting source files together under
-`$ROOT/nano/jtag2updi`. The upstream source is MIT licensed; the included Uno
-source carries its upstream license.
+The canonical JTAG2UPDI source, including the control-bus extension, is
+`$ROOT/uno/jtag2updi`. Use that same source for both master boards. The CLI
+maps the legacy `$ROOT/nano/jtag2updi` path to this canonical source, so a
+divergent Nano copy is not used by `build` or `flash-sketch`.
+The selected `--platform` changes the compile and upload profile: Uno uses
+`arduino:avr:uno` and the standard bootloader rate; a classic Nano uses
+`arduino:avr:nano:cpu=atmega328old` and the old-bootloader upload rate.
+The firmware is intended to use the same D5 control-bus and D6 UPDI wiring on
+either board, but the Nano control bus is not currently working; see the
+[verified baseline](VERIFIED_BASELINE.md).
 
 ## 5. Sketch layout and board profiles
 
@@ -211,7 +212,7 @@ name. For example:
 
 ```text
 /storage/emulated/0/Download/andruino/uno/Blink300/Blink300.ino
-/storage/emulated/0/Download/andruino/nano/jtag2updi/jtag2updi.ino
+/storage/emulated/0/Download/andruino/uno/jtag2updi/jtag2updi.ino
 /storage/emulated/0/Download/andruino/attiny1614/Blink3000/Blink3000.ino
 ```
 
@@ -302,7 +303,7 @@ andruino-flash flash-sketch --platform uno --usb-device "$UNO_USB" \
 # Put JTAG2UPDI on the Uno, then flash the ATtiny wired to that Uno.
 andruino-flash flash-sketch --platform uno --usb-device "$UNO_USB" \
   "$ROOT/uno/jtag2updi/jtag2updi.ino"
-andruino-flash flash-sketch --platform attiny1614 --usb-device "$UNO_USB" \
+andruino-flash flash-sketch --platform attiny1614 --node 1 --usb-device "$UNO_USB" \
   "$ROOT/attiny1614/Blink300/Blink300.ino"
 ```
 
@@ -313,10 +314,10 @@ andruino-flash flash-sketch --platform attiny1614 --usb-device "$UNO_USB" \
 andruino-flash flash-sketch --platform nano --usb-device "$NANO_USB" \
   "$ROOT/nano/Blink3000/Blink3000.ino"
 
-# Put JTAG2UPDI on the Nano, then flash the ATtiny wired to that Nano.
+# Put the same JTAG2UPDI source on the Nano using its old-bootloader profile.
 andruino-flash flash-sketch --platform nano --usb-device "$NANO_USB" \
-  "$ROOT/nano/jtag2updi/jtag2updi.ino"
-andruino-flash flash-sketch --platform attiny1614 --usb-device "$NANO_USB" \
+  "$ROOT/uno/jtag2updi/jtag2updi.ino"
+andruino-flash flash-sketch --platform attiny1614 --node 1 --usb-device "$NANO_USB" \
   "$ROOT/attiny1614/Blink3000/Blink3000.ino"
 ```
 
@@ -331,9 +332,16 @@ explicitly:
 
 ```sh
 andruino-flash flash-sketch --platform attiny1614 \
+  --node 1 \
   --usb-device "$NANO_USB" \
   /storage/emulated/0/Download/my-sketches/Blink/Blink.ino
 ```
+
+For an ATtiny1614, `--node N` puts the master in FLASH mode and selects node
+`N` before programming. Without `--node`, select the target first with
+`andruino-flash bus ... MODE FLASH` and `SELECT N`; the app verifies that the
+requested node matches the master's saved selection before enabling its UPDI
+gate. This prevents accidentally programming a different node.
 
 To compile without flashing:
 
@@ -349,7 +357,7 @@ andruino-flash flash-platform --usb-device "$UNO_USB" uno \
   "$ROOT/uno/Blink300/Blink300.ino.hex"
 andruino-flash flash-platform --usb-device "$NANO_USB" nano \
   "$ROOT/nano/Blink3000/Blink3000.ino.hex"
-andruino-flash flash-platform --usb-device "$NANO_USB" attiny1614 \
+andruino-flash flash-platform --node 1 --usb-device "$NANO_USB" attiny1614 \
   "$ROOT/attiny1614/Blink3000/Blink3000.ino.hex"
 ```
 
@@ -357,10 +365,14 @@ For batch operations, put these commands in a shell script and run it from
 Termux. Review the board order: each `flash-sketch` invocation writes to the
 selected board immediately.
 
-## 8. Uno control bus for up to three ATtiny1614 nodes
+## 8. Uno/Nano control bus for seven ATtiny1614 nodes
 
-The optional bus firmware is for the **Uno JTAG2UPDI programmer** and up to
-three ATtiny1614 nodes. Connect Uno D5 to each node's PB3/RX signal through its own
+The shared bus firmware is designed for either the **Uno or classic Nano
+JTAG2UPDI master** and up to seven ATtiny1614 nodes. The complete bus test is
+verified on Uno; the Nano was built and flash-verified from the same source but
+currently does not communicate with the nodes. See the [verified baseline](VERIFIED_BASELINE.md)
+before treating Nano as working. The intended wiring is the same for both
+boards. Connect master D5 to each node's PB3/RX signal through its own
 1 kOhm series resistor; connect each node's PB2/TX signal to the same bus
 through its own 1 kOhm series resistor. Use the pinout for your exact ATtiny
 package or breakout board to locate PB3 and PB2; do not rely on package pin
@@ -374,22 +386,24 @@ On the standard 14-pin ATtiny1614 package, the node bus uses PB3/RX and PB2/TX
 PB0 is HIGH while PA5 is LOW (LED lit), and PB0 is LOW while PA5 is HIGH (LED off).
 Treat PB0 as a logic output; do not
 connect it directly to the UPDI bus.
-`STATUS` includes the firmware-commanded LED state (`LED ON` or `LED OFF`);
-this confirms the node's logic but does not measure the physical pin voltage.
+`STATUS` reports mode plus valve (`V`), motor (`M`), LED (`L`), and UPDI (`U`)
+states in a compact form; for example, `NODE 1 STATUS COMM V=OFF M=OFF
+L=OFF U=ON`. The LED value confirms the node's logic but does not measure the
+physical pin voltage.
 The updated node firmware identifies itself as
 `ANDRUINO-ATTINY1614-BUS-4` with the `VERSION` command.
-Install node firmware from `attiny1614/BlinkNode1`, `BlinkNode2`, and
-`BlinkNode3`. Each sketch uses the shared
+Install node firmware from `attiny1614/BlinkNode1` through `BlinkNode7`. Each
+sketch uses the shared
 `attiny1614/libraries/AndruinoBusNode` library; keep the `libraries` directory
 under `$ROOT/attiny1614` so the Termux build helper can find it.
 
-The Uno master uses D5 at 2400 baud and the Android app sends its control
-requests to the Uno's USB serial adapter at 19200 baud. Because JTAG2UPDI
+The master uses D5 at 2400 baud and the Android app sends control
+requests to the master's USB serial adapter at 19200 baud. Because JTAG2UPDI
 provides its own `main()` instead of Arduino's normal core startup, the master
 initializes the Arduino millisecond timer and enables interrupts only while
 processing a bus command. This supports SoftwareSerial reception without
 leaving periodic interrupts enabled during UPDI programming. Build and install
-the modified Uno programmer and all three nodes:
+the modified Uno programmer and all seven nodes:
 
 ```sh
 andruino-flash flash-sketch --platform uno --usb-device "$UNO_USB" \
@@ -400,47 +414,56 @@ andruino-flash flash-sketch --platform attiny1614 --usb-device "$UNO_USB" \
   "$ROOT/attiny1614/BlinkNode2/BlinkNode2.ino"
 andruino-flash flash-sketch --platform attiny1614 --usb-device "$UNO_USB" \
   "$ROOT/attiny1614/BlinkNode3/BlinkNode3.ino"
+andruino-flash flash-sketch --platform attiny1614 --usb-device "$UNO_USB" \
+  "$ROOT/attiny1614/BlinkNode4/BlinkNode4.ino"
+andruino-flash flash-sketch --platform attiny1614 --usb-device "$UNO_USB" \
+  "$ROOT/attiny1614/BlinkNode5/BlinkNode5.ino"
+andruino-flash flash-sketch --platform attiny1614 --usb-device "$UNO_USB" \
+  "$ROOT/attiny1614/BlinkNode6/BlinkNode6.ino"
+andruino-flash flash-sketch --platform attiny1614 --usb-device "$UNO_USB" \
+  "$ROOT/attiny1614/BlinkNode7/BlinkNode7.ino"
 ```
 
-Use the new bus command with the Uno's current USB path (not a Nano path):
+Use the same commands with the USB path for whichever master is connected:
 
 ```sh
-andruino-flash bus --usb-device "$UNO_USB" PING 1
-andruino-flash bus --usb-device "$UNO_USB" STATUS 2
-andruino-flash bus --usb-device "$UNO_USB" VERSION 1
-andruino-flash bus --usb-device "$UNO_USB" BLINK 2 200
-andruino-flash bus --usb-device "$UNO_USB" BLINK 1 1000
-andruino-flash bus --usb-device "$UNO_USB" PING 3
-andruino-flash bus --usb-device "$UNO_USB" SELECT 1
-andruino-flash bus --usb-device "$UNO_USB" SELECT 3
-andruino-flash bus --usb-device "$UNO_USB" MODE COMM
-andruino-flash bus --usb-device "$UNO_USB" MODE FLASH
+MASTER_USB="$UNO_USB"   # set to "$NANO_USB" when using the Nano
+andruino-flash bus --usb-device "$MASTER_USB" PING 1
+andruino-flash bus --usb-device "$MASTER_USB" STATUS 2
+andruino-flash bus --usb-device "$MASTER_USB" VERSION 1
+andruino-flash bus --usb-device "$MASTER_USB" BLINK 2 200
+andruino-flash bus --usb-device "$MASTER_USB" BLINK 1 1000
+andruino-flash bus --usb-device "$MASTER_USB" PING 3
+andruino-flash bus --usb-device "$MASTER_USB" SELECT 1
+andruino-flash bus --usb-device "$MASTER_USB" SELECT 3
+andruino-flash bus --usb-device "$MASTER_USB" MODE COMM
+andruino-flash bus --usb-device "$MASTER_USB" MODE FLASH
 ```
 
-`MODE FLASH` sets the Uno and all installed nodes to system-wide FLASH mode;
+`MODE FLASH` sets the master and all installed nodes to system-wide FLASH mode;
 `MODE COMM` sets them back to communication mode. These mode commands
 are sent individually to each addressed node to avoid multiple simultaneous
-replies on the half-duplex bus. `SELECT 1`, `SELECT 2`, or `SELECT 3` informs
-every installed node of the chosen target. Each node records whether its own
+replies on the half-duplex bus. `SELECT 1` through `SELECT 7` informs every
+installed node of the chosen target. Each node records whether its own
 address matches the selection, while all remain in the current system mode.
-Install and flash firmware for addresses 1, 2, and 3 before using system-mode
-or selection commands: the Uno iterates through all three addresses, so an
-absent node causes those commands to report an error. For example:
+Install and flash firmware for each connected node before using system-mode
+or selection commands: the master iterates over active node addresses 1–7, so
+an absent active node causes those commands to report an error. For example:
 
 ```sh
 # Enter system-wide flash mode, then select node 1.
-andruino-flash bus --usb-device "$UNO_USB" MODE FLASH
-andruino-flash bus --usb-device "$UNO_USB" SELECT 1
-andruino-flash bus --usb-device "$UNO_USB" STATUS 1
-andruino-flash bus --usb-device "$UNO_USB" STATUS 2
-andruino-flash bus --usb-device "$UNO_USB" STATUS 3
+andruino-flash bus --usb-device "$MASTER_USB" MODE FLASH
+andruino-flash bus --usb-device "$MASTER_USB" SELECT 1
+andruino-flash bus --usb-device "$MASTER_USB" STATUS 1
+andruino-flash bus --usb-device "$MASTER_USB" STATUS 2
+andruino-flash bus --usb-device "$MASTER_USB" STATUS 3
 
 # After manually moving UPDI to a target, select that node before flashing.
-andruino-flash bus --usb-device "$UNO_USB" SELECT 2
-andruino-flash bus --usb-device "$UNO_USB" SELECT 3
+andruino-flash bus --usb-device "$MASTER_USB" SELECT 2
+andruino-flash bus --usb-device "$MASTER_USB" SELECT 3
 
 # Exit flash mode only when the system should resume normal operation.
-andruino-flash bus --usb-device "$UNO_USB" MODE COMM
+andruino-flash bus --usb-device "$MASTER_USB" MODE COMM
 ```
 
 In FLASH mode, all nodes should report `MODE FLASH`; the selected
@@ -451,13 +474,14 @@ intervals. `PING`, `STATUS`, `VERSION`, and mode/selection control remain
 available while in FLASH mode; blink changes are only accepted while the
 addressed node is in COMM mode.
 
-The Uno and nodes persist system mode and selection in EEPROM, so programming
+The master and nodes persist system mode and selection in EEPROM, so programming
 or resetting a selected node does not silently put it back in COMM mode or
-forget which target was selected. Each command prints the Uno response as
+forget which target was selected. Each command prints the master response as
 `BUS_RESPONSE ...`; absent nodes or malformed commands return an error. The
-Uno retries each addressed bus request up to three times and ignores stale or
-other-node response lines. The Android service allows up to ten seconds for a
-command response.
+master retries each addressed bus request up to three times and ignores stale or
+other-node response lines. The Android service allows up to twenty seconds for a
+command response. It validates each response against the issued command;
+unrelated or stale lines are discarded and cannot produce a false success.
 
 **These are software states only, not UPDI electrical isolation or a hardware
 target selector.** This implementation does not make it safe to leave both
@@ -465,6 +489,39 @@ UPDI pins connected to a shared UPDI line. Continue manually switching the
 UPDI connection to the target being programmed. EEPROM persistence depends on
 the device's EEPROM-preserve setting during chip erase; the supplied ATtiny
 profile enables EEPROM preservation.
+
+### Full seven-node communication and reflash test
+
+With the address-specific `BlinkNode1` through `BlinkNode7` sketches present
+under `$ROOT/attiny1614`, install the updated CLI and copy
+`comprehensive_test.sh` to Termux as `~/comprehensive_test_nano.sh`. Then run:
+
+```sh
+chmod 700 ~/comprehensive_test_nano.sh
+NANO_USB=/dev/bus/usb/001/011
+~/comprehensive_test_nano.sh "$NANO_USB"
+```
+
+Replace the example USB path with the current path from `andruino-flash devices`.
+The script discovers all seven nodes, verifies initial PING,
+rebuilds and reflashes each address-specific sketch with AVRDUDE read-back
+verification, then tests status/version, LED/blink, UPDI gating, virtual
+valve/motor commands, stop, motion status, and encoder responses. It restores
+COMM mode and turns the LEDs off afterward. Keep actuator loads disconnected:
+the generic `BlinkNodeN` firmware only verifies logical command responses and
+does not validate physical motors, valves, or sensors. The test runs once; it
+flashes each node once. Use `--no-flash` for later communication-only reruns.
+
+To rerun only communications and command checks after a failed test, without
+reflashing the nodes, pass `--no-flash` before the USB path:
+
+```sh
+~/comprehensive_test_nano.sh --no-flash "$NANO_USB"
+```
+
+The checked-in [verified baseline](VERIFIED_BASELINE.md) records the exact
+source and release hashes, tool versions, and the latest tested results for
+both master boards.
 
 ## 9. Verify and troubleshoot
 
@@ -519,5 +576,8 @@ The tested environment used:
 
 Reference Blink builds were about 922-924 bytes for Uno/Nano and 686-688 bytes
 for ATtiny1614, with 9-10 bytes of global variables. JTAG2UPDI builds were
-3,984 bytes with 715 bytes of global variables. Exact sizes can vary with
-Arduino CLI/core/toolchain versions.
+3,984 bytes with 715 bytes of global variables in an earlier, pre-control-bus
+build. The verified control-bus master compiled for Nano old bootloader was
+13,106 bytes with 1,676 bytes of global memory. Exact sizes can vary with
+Arduino CLI/core/toolchain versions; see the verified baseline for artifact
+hashes and the complete test record.
