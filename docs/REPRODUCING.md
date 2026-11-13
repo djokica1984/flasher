@@ -206,6 +206,26 @@ Uno-tested master HEX uploaded to a Nano at the old-bootloader rate. A separate
 Nano-profile rebuild failed bus communication; use the archived known-good HEX
 and see the [verified baseline](VERIFIED_BASELINE.md).
 
+The exact source that produced the strict HEX is saved in
+`releases/uno-jtag2updi/strict-source/` (recovered from Git commit
+`7f03242c41dd08c5216a8ef515b590b8dcf54cbe`). To reproduce it on Windows with
+Arduino AVR Boards `1.8.8` and AVR-GCC `7.3.0-atmel3.6.1-arduino7`, run from
+the repository root in PowerShell:
+
+```powershell
+$output = Join-Path $env:TEMP "uno-jtag2updi-strict-build"
+.\tools\build-uno-firmware.ps1 `
+  -SourceDirectory ".\releases\uno-jtag2updi\strict-source" `
+  -OutputDirectory $output
+Get-FileHash (Join-Path $output "jtag2updi-fixed.hex") -Algorithm SHA256
+```
+
+The expected SHA-256 is
+`19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d`.
+This was verified as a byte-for-byte HEX match. The Termux Arduino CLI build
+does not reproduce this image; do not substitute it when rebuilding the strict
+master firmware.
+
 ## 5. Sketch layout and board profiles
 
 Arduino CLI expects a sketch directory and its main `.ino` to have the same

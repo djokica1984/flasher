@@ -27,14 +27,27 @@ test and the failed Nano-profile rebuild; those are different firmware images.
   may need approval again after reconnecting. USB device paths are ephemeral;
   rediscover them with `andruino-flash devices`.
 
-### Current tracked source fingerprints
+### Recovered strict-image source
+
+The complete source snapshot that reproduces the strict master HEX is saved at
+[`releases/uno-jtag2updi/strict-source/`](../releases/uno-jtag2updi/strict-source/).
+It matches the `andruino/uno/jtag2updi/` source at Git commit
+`7f03242c41dd08c5216a8ef515b590b8dcf54cbe`. Rebuilding this snapshot with
+[`tools/build-uno-firmware.ps1`](../tools/build-uno-firmware.ps1), Arduino AVR
+Boards core `1.8.8`, and AVR-GCC
+`7.3.0-atmel3.6.1-arduino7` produced SHA-256
+`19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d`, exactly
+matching the archived strict HEX. The custom PowerShell build is significant:
+Arduino CLI builds of this source with the Termux toolchain did not reproduce
+the image.
+
+### Current source fingerprints
 
 SHA-256 values for the current checked-out source files:
 
-The original compile-time source hashes for the archived
-`uno-jtag2updi-strict.hex` were not captured. Its exact binary is preserved and
-identified by SHA-256 below; the source hashes in this section describe the
-current repository tree and are not asserted to recreate that historical image.
+These hashes describe the current working source tree, which has changes made
+after the recovered strict-image snapshot. Use the saved snapshot above to
+reproduce the strict HEX.
 
 | File | SHA-256 |
 |---|---|

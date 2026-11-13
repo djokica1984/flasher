@@ -1,6 +1,7 @@
 param(
     [string]$ArduinoRoot = "$env:LOCALAPPDATA\Arduino15",
-    [string]$OutputDirectory = "$PSScriptRoot\..\releases\uno-jtag2updi"
+    [string]$OutputDirectory = "$PSScriptRoot\..\releases\uno-jtag2updi",
+    [string]$SourceDirectory = "$PSScriptRoot\..\andruino\uno\jtag2updi"
 )
 
 $ErrorActionPreference = 'Stop'
@@ -12,7 +13,7 @@ $tool = Get-ChildItem "$ArduinoRoot\packages\arduino\tools\avr-gcc" -Directory |
     Sort-Object Name -Descending | Select-Object -First 1
 if (-not $core -or -not $tool) { throw 'Arduino AVR core and avr-gcc are required; install Arduino AVR boards support.' }
 
-$root = Join-Path $PSScriptRoot '..\andruino\uno\jtag2updi'
+$root = (Resolve-Path -LiteralPath $SourceDirectory).Path
 $corePath = $core.FullName
 $toolPath = $tool.FullName
 $gcc = Join-Path $toolPath 'bin\avr-g++.exe'
