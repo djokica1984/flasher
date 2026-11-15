@@ -20,3 +20,10 @@ The verified output SHA-256 is
 `19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d`.
 Flash that generated image to an Uno with the `uno` profile. Do not substitute
 the current `andruino/uno/jtag2updi` Arduino CLI build.
+
+The single-node Termux test can also rebuild this package before flashing the
+Uno. It uses `build-strict-master.sh` with the matching Arduino AVR core and
+AVR-GCC versions, and refuses to flash unless the output matches the verified
+SHA-256 above. The `.ino` file is the sketch entry point; the implementation is
+compiled from the sibling C++ sources. Do not use `arduino-cli compile` for the
+master image.

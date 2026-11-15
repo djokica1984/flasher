@@ -517,10 +517,11 @@ profile enables EEPROM preservation.
 
 For a setup with one Uno master and only ATtiny1614 node 1 connected, use
 `comprehensive_test_uno_node1.sh` from the repository root. This script
-reflashes the strict-source Uno JTAG2UPDI build, then builds and flashes
-`attiny1614/BlinkNode1/BlinkNode1.ino` and runs the node 1 command checks. Do
-not use the current `andruino/uno/jtag2updi` source with `flash-sketch` for this
-master: its Termux Arduino CLI build is not the verified strict image.
+rebuilds and reflashes the strict-source Uno JTAG2UPDI image, then builds and
+flashes `attiny1614/BlinkNode1/BlinkNode1.ino` and runs the node 1 command
+checks. Do not use the current `andruino/uno/jtag2updi` source with
+`flash-sketch` for this master: its Termux Arduino CLI build is not the verified
+strict image.
 
 The recovered strict source set is packaged under both
 `andruino/uno/uno-jtag2updi-strict` and
@@ -536,17 +537,22 @@ $output = Join-Path $env:TEMP "uno-jtag2updi-strict-build"
   -SourceDirectory ".\andruino\uno\uno-jtag2updi-strict" `
   -OutputDirectory $output
 Get-FileHash (Join-Path $output "jtag2updi-fixed.hex") -Algorithm SHA256
-adb push (Join-Path $output "jtag2updi-fixed.hex") `
-  /sdcard/Download/uno-jtag2updi-strict-source-build.hex
 ```
 
 The expected SHA-256 is
 `19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d`.
-The Termux script checks this hash and refuses any other master image. The
-Nano package is a source reference for parity; use the UNO-built image with
-Nano's old-bootloader profile rather than independently rebuilding for Nano.
-Before flashing, copy the complete `andruino` directory to the phone so the
-ATtiny library is present:
+For the full single-node test, the Termux script builds the complete package
+using `andruino/uno/uno-jtag2updi-strict/build-strict-master.sh` in the Ubuntu
+proot, checks the output hash, and only then flashes it. This custom build uses
+the same Arduino AVR core `1.8.8` and AVR-GCC
+`7.3.0-atmel3.6.1-arduino7` as the Windows builder; it deliberately does not
+use Arduino CLI to build the master. The Nano package is a source reference for
+parity; use the UNO-built image with Nano's old-bootloader profile rather than
+independently rebuilding for Nano. No prebuilt HEX needs to be copied to the
+phone for the default single-node test.
+
+Copy the complete `andruino` directory to the phone so the strict source
+package, build helper, and ATtiny library are all present:
 
 ```powershell
 adb push andruino /sdcard/Download/
@@ -565,18 +571,18 @@ UNO_USB=/dev/bus/usb/001/008
 
 Use the current USB path shown by `andruino-flash devices`; it can change after
 reconnecting the Uno. If it is the only supported USB adapter, the script can
-discover the path automatically. During the run, disconnect the Uno's D5 bus
-and D6 UPDI connections from the target while the Uno master is reflashed, then
-reconnect them when prompted. Keep exactly one target connected. The script
-accepts either no responding node (for a blank first-time target) or node 1
-after the master is reflashed; it refuses to proceed if any other node address
-is discovered. The ATtiny flashing step uses `--node 1`. The script ends in
-COMM mode with the LED off and the node's UPDI gate disabled.
+discover the path automatically. The single-node test leaves node 1 connected
+to D5/D6 while it reflashes the Uno and ATtiny. Keep exactly one target
+connected. The script accepts either no responding node (for a blank first-time
+target) or node 1 after the master is reflashed; it refuses to proceed if any
+other node address is discovered. The ATtiny flashing step uses `--node 1`.
+The script ends in COMM mode with the LED off and the node's UPDI gate disabled.
 
-If the strict-source master has just been reflashed and verified separately
-while D5/D6 were disconnected, use `--master-already-flashed` after reconnecting
-the single node. This still flashes node 1 and runs all communication checks;
-it is not the communication-only `--no-flash` mode:
+The default test builds and reflashes the strict-source master, then flashes
+node 1 and runs all communication checks. If the strict-source master has just
+been reflashed and verified separately, use `--master-already-flashed`. This
+still flashes node 1 and runs all communication checks; it is not the
+communication-only `--no-flash` mode:
 
 ```sh
 ~/comprehensive_test_uno_node1.sh --master-already-flashed "$UNO_USB"

@@ -43,6 +43,9 @@ fi
 
 SKETCH_ROOT="${ANDRUINO_SKETCH_ROOT:-/storage/emulated/0/Download/andruino}"
 STRICT_MASTER_HEX="${UNO_STRICT_MASTER_HEX:-/storage/emulated/0/Download/uno-jtag2updi-strict-source-build.hex}"
+STRICT_MASTER_SOURCE_DIR="${UNO_STRICT_MASTER_SOURCE_DIR:-$SKETCH_ROOT/uno/uno-jtag2updi-strict}"
+STRICT_MASTER_SKETCH="$STRICT_MASTER_SOURCE_DIR/uno-jtag2updi-strict.ino"
+STRICT_MASTER_BUILDER="$STRICT_MASTER_SOURCE_DIR/build-strict-master.sh"
 STRICT_MASTER_SHA256="19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d"
 export ANDRUINO_SKETCH_ROOT="$SKETCH_ROOT"
 node_available=0
@@ -164,40 +167,41 @@ echo "This test checks firmware protocol/state, not physical actuators or sensor
 
 if [[ "$skip_flash" -eq 0 ]]; then
     node_sketch="$SKETCH_ROOT/attiny1614/BlinkNode1/BlinkNode1.ino"
-    if [[ ! -f "$STRICT_MASTER_HEX" ]]; then
-        echo "Missing strict-source UNO image: $STRICT_MASTER_HEX" >&2
-        echo "Build it from releases/uno-jtag2updi/strict-source with tools/build-uno-firmware.ps1." >&2
-        exit 1
-    fi
-    if ! command -v sha256sum >/dev/null 2>&1; then
-        echo "sha256sum is required to verify the strict-source UNO image." >&2
-        exit 1
-    fi
-    if [[ "$(sha256sum -- "$STRICT_MASTER_HEX" | awk '{print $1}')" != "$STRICT_MASTER_SHA256" ]]; then
-        echo "Refusing to flash an unverified UNO master image: $STRICT_MASTER_HEX" >&2
-        echo "Expected SHA-256: $STRICT_MASTER_SHA256" >&2
-        exit 1
-    fi
     if [[ ! -f "$node_sketch" ]]; then
         echo "Missing node 1 sketch: $node_sketch" >&2
         exit 1
     fi
 
     if [[ "$master_already_flashed" -eq 0 ]]; then
-        if [[ ! -t 0 ]]; then
-            echo "Flashing the master requires an interactive terminal for the D5/D6 wiring steps." >&2
-            echo "Run interactively or reflash and verify the master separately, then use --master-already-flashed." >&2
-            exit 2
+        if [[ ! -f "$STRICT_MASTER_SKETCH" || ! -f "$STRICT_MASTER_BUILDER" ]]; then
+            echo "Missing strict Uno source package or builder." >&2
+            echo "Expected sketch: $STRICT_MASTER_SKETCH" >&2
+            echo "Expected builder: $STRICT_MASTER_BUILDER" >&2
+            exit 1
         fi
-        echo "Disconnect UNO D5 (bus) and D6 (UPDI) from the ATtiny before reflashing the UNO."
-        read -r -p "Leave the UNO connected to USB, disconnect D5/D6, then press Enter: "
+        if ! command -v sha256sum >/dev/null 2>&1; then
+            echo "sha256sum is required to verify the strict-source UNO image." >&2
+            exit 1
+        fi
+        echo "Building strict master from: $STRICT_MASTER_SKETCH"
+        proot-distro login ubuntu -- bash "$STRICT_MASTER_BUILDER" \
+            "$STRICT_MASTER_SOURCE_DIR" "$STRICT_MASTER_HEX"
+        if [[ ! -f "$STRICT_MASTER_HEX" ]]; then
+            echo "Strict-source UNO build did not produce: $STRICT_MASTER_HEX" >&2
+            exit 1
+        fi
+        if [[ "$(sha256sum -- "$STRICT_MASTER_HEX" | awk '{print $1}')" != "$STRICT_MASTER_SHA256" ]]; then
+            echo "Refusing to flash an unverified UNO master image: $STRICT_MASTER_HEX" >&2
+            echo "Expected SHA-256: $STRICT_MASTER_SHA256" >&2
+            exit 1
+        fi
+        echo "Keeping the single node 1 connected to the D5/D6 bus during master flashing."
         flash_and_verify "strict-source UNO JTAG2UPDI master flash" \
             andruino-flash flash-platform \
             --usb-device "$master_usb" \
             uno \
             "$STRICT_MASTER_HEX"
 
-        read -r -p "Reconnect D5/D6 and power the single ATtiny1614 node, then press Enter: "
         discovery_status=0
         discover_single_node || discovery_status=$?
         if [[ "$discovery_status" -ne 0 && "$discovery_status" -ne 2 ]]; then
