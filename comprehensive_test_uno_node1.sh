@@ -4,6 +4,7 @@ set -euo pipefail
 export PATH="$HOME/bin:$PATH"
 
 skip_flash=0
+master_already_flashed=0
 master_usb=""
 while [[ "$#" -gt 0 ]]; do
     case "$1" in
@@ -11,13 +12,17 @@ while [[ "$#" -gt 0 ]]; do
             skip_flash=1
             shift
             ;;
+        --master-already-flashed)
+            master_already_flashed=1
+            shift
+            ;;
         --help|-h)
-            echo "Usage: $0 [--no-flash] [UNO_USB_PATH]"
+            echo "Usage: $0 [--no-flash | --master-already-flashed] [UNO_USB_PATH]"
             exit 0
             ;;
         -*)
             echo "Unknown option: $1" >&2
-            echo "Usage: $0 [--no-flash] [UNO_USB_PATH]" >&2
+            echo "Usage: $0 [--no-flash | --master-already-flashed] [UNO_USB_PATH]" >&2
             exit 2
             ;;
         *)
@@ -30,6 +35,11 @@ while [[ "$#" -gt 0 ]]; do
             ;;
     esac
 done
+
+if [[ "$skip_flash" -eq 1 && "$master_already_flashed" -eq 1 ]]; then
+    echo "Choose either --no-flash or --master-already-flashed, not both." >&2
+    exit 2
+fi
 
 SKETCH_ROOT="${ANDRUINO_SKETCH_ROOT:-/storage/emulated/0/Download/andruino}"
 STRICT_MASTER_HEX="${UNO_STRICT_MASTER_HEX:-/storage/emulated/0/Download/uno-jtag2updi-strict-source-build.hex}"
@@ -173,25 +183,33 @@ if [[ "$skip_flash" -eq 0 ]]; then
         exit 1
     fi
 
-    if [[ ! -t 0 ]]; then
-        echo "Flashing requires an interactive terminal for the D5/D6 wiring steps." >&2
-        echo "Rerun from Termux interactively, or use --no-flash." >&2
-        exit 2
-    fi
-    echo "Disconnect UNO D5 (bus) and D6 (UPDI) from the ATtiny before reflashing the UNO."
-    read -r -p "Leave the UNO connected to USB, disconnect D5/D6, then press Enter: "
-    flash_and_verify "strict-source UNO JTAG2UPDI master flash" \
-        andruino-flash flash-platform \
-        --usb-device "$master_usb" \
-        uno \
-        "$STRICT_MASTER_HEX"
+    if [[ "$master_already_flashed" -eq 0 ]]; then
+        if [[ ! -t 0 ]]; then
+            echo "Flashing the master requires an interactive terminal for the D5/D6 wiring steps." >&2
+            echo "Run interactively or reflash and verify the master separately, then use --master-already-flashed." >&2
+            exit 2
+        fi
+        echo "Disconnect UNO D5 (bus) and D6 (UPDI) from the ATtiny before reflashing the UNO."
+        read -r -p "Leave the UNO connected to USB, disconnect D5/D6, then press Enter: "
+        flash_and_verify "strict-source UNO JTAG2UPDI master flash" \
+            andruino-flash flash-platform \
+            --usb-device "$master_usb" \
+            uno \
+            "$STRICT_MASTER_HEX"
 
-    read -r -p "Reconnect D5/D6 and power the single ATtiny1614 node, then press Enter: "
-    discovery_status=0
-    discover_single_node || discovery_status=$?
-    if [[ "$discovery_status" -ne 0 && "$discovery_status" -ne 2 ]]; then
-        echo "Discovery failed or another node is connected; refusing to continue." >&2
-        exit 1
+        read -r -p "Reconnect D5/D6 and power the single ATtiny1614 node, then press Enter: "
+        discovery_status=0
+        discover_single_node || discovery_status=$?
+        if [[ "$discovery_status" -ne 0 && "$discovery_status" -ne 2 ]]; then
+            echo "Discovery failed or another node is connected; refusing to continue." >&2
+            exit 1
+        fi
+    else
+        echo "Skipping repeated master flash; reflash and verify the strict-source image first."
+        if ! discover_single_node; then
+            echo "Expected exactly node 1 after the master reflash; refusing to continue." >&2
+            exit 1
+        fi
     fi
 
     flash_and_verify "ATtiny1614 node 1 flash" \

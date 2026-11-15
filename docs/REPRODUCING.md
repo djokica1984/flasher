@@ -522,15 +522,18 @@ reflashes the strict-source Uno JTAG2UPDI build, then builds and flashes
 not use the current `andruino/uno/jtag2updi` source with `flash-sketch` for this
 master: its Termux Arduino CLI build is not the verified strict image.
 
-The recovered strict source set is
-`releases/uno-jtag2updi/strict-source`. Its `jtag2updi.ino` is the sketch entry
-point; the implementation is in the sibling C++ files. Rebuild the complete
+The recovered strict source set is packaged under both
+`andruino/uno/uno-jtag2updi-strict` and
+`andruino/nano/nano-jtag2updi-strict`.
+`uno-jtag2updi-strict.ino` and `nano-jtag2updi-strict.ino` are Arduino sketch
+entry points; the implementation is in the sibling C++ files. The UNO
+package is the build source for the verified image. Rebuild the complete
 source set with the custom Windows builder and copy its output to the phone:
 
 ```powershell
 $output = Join-Path $env:TEMP "uno-jtag2updi-strict-build"
 .\tools\build-uno-firmware.ps1 `
-  -SourceDirectory ".\releases\uno-jtag2updi\strict-source" `
+  -SourceDirectory ".\andruino\uno\uno-jtag2updi-strict" `
   -OutputDirectory $output
 Get-FileHash (Join-Path $output "jtag2updi-fixed.hex") -Algorithm SHA256
 adb push (Join-Path $output "jtag2updi-fixed.hex") `
@@ -539,7 +542,9 @@ adb push (Join-Path $output "jtag2updi-fixed.hex") `
 
 The expected SHA-256 is
 `19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d`.
-The Termux script checks this hash and refuses any other master image.
+The Termux script checks this hash and refuses any other master image. The
+Nano package is a source reference for parity; use the UNO-built image with
+Nano's old-bootloader profile rather than independently rebuilding for Nano.
 Before flashing, copy the complete `andruino` directory to the phone so the
 ATtiny library is present:
 
@@ -567,6 +572,15 @@ accepts either no responding node (for a blank first-time target) or node 1
 after the master is reflashed; it refuses to proceed if any other node address
 is discovered. The ATtiny flashing step uses `--node 1`. The script ends in
 COMM mode with the LED off and the node's UPDI gate disabled.
+
+If the strict-source master has just been reflashed and verified separately
+while D5/D6 were disconnected, use `--master-already-flashed` after reconnecting
+the single node. This still flashes node 1 and runs all communication checks;
+it is not the communication-only `--no-flash` mode:
+
+```sh
+~/comprehensive_test_uno_node1.sh --master-already-flashed "$UNO_USB"
+```
 
 Use `--no-flash` to rerun communication checks without reflashing either
 device:

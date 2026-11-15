@@ -30,7 +30,10 @@ test and the failed Nano-profile rebuild; those are different firmware images.
 ### Recovered strict-image source
 
 The complete source snapshot that reproduces the strict master HEX is saved at
-[`releases/uno-jtag2updi/strict-source/`](../releases/uno-jtag2updi/strict-source/).
+[`releases/uno-jtag2updi/strict-source/`](../releases/uno-jtag2updi/strict-source/)
+and copied into board-specific packages at
+[`andruino/uno/uno-jtag2updi-strict/`](../andruino/uno/uno-jtag2updi-strict/)
+and [`andruino/nano/nano-jtag2updi-strict/`](../andruino/nano/nano-jtag2updi-strict/).
 It matches the `andruino/uno/jtag2updi/` source at Git commit
 `7f03242c41dd08c5216a8ef515b590b8dcf54cbe`. Rebuilding this snapshot with
 [`tools/build-uno-firmware.ps1`](../tools/build-uno-firmware.ps1), Arduino AVR
@@ -47,7 +50,10 @@ was recovered and compared against the repository snapshot: all 25 source
 files match byte-for-byte. The phone directory also contains a separately
 generated `jtag2updi.ino.hex`; that file is not the verified strict image and
 was not used. Rebuilding the repository source set with the custom builder
-again produced the expected strict-image SHA-256 above.
+again produced the expected strict-image SHA-256 above. The default source for
+[`tools/build-uno-firmware.ps1`](../tools/build-uno-firmware.ps1) now points to
+the UNO strict package so a default build cannot accidentally select the
+newer non-strict `andruino/uno/jtag2updi` tree.
 
 ### Current source fingerprints
 

@@ -1,7 +1,7 @@
 param(
     [string]$ArduinoRoot = "$env:LOCALAPPDATA\Arduino15",
     [string]$OutputDirectory = "$PSScriptRoot\..\releases\uno-jtag2updi",
-    [string]$SourceDirectory = "$PSScriptRoot\..\andruino\uno\jtag2updi"
+    [string]$SourceDirectory = "$PSScriptRoot\..\andruino\uno\uno-jtag2updi-strict"
 )
 
 $ErrorActionPreference = 'Stop'
