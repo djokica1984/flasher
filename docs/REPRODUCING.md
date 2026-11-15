@@ -513,6 +513,82 @@ UPDI connection to the target being programmed. EEPROM persistence depends on
 the device's EEPROM-preserve setting during chip erase; the supplied ATtiny
 profile enables EEPROM preservation.
 
+### Single-node UNO reflash and communication test
+
+For a setup with one Uno master and only ATtiny1614 node 1 connected, use
+`comprehensive_test_uno_node1.sh` from the repository root. This script
+reflashes the strict-source Uno JTAG2UPDI build, then builds and flashes
+`attiny1614/BlinkNode1/BlinkNode1.ino` and runs the node 1 command checks. Do
+not use the current `andruino/uno/jtag2updi` source with `flash-sketch` for this
+master: its Termux Arduino CLI build is not the verified strict image.
+
+The recovered strict source set is
+`releases/uno-jtag2updi/strict-source`. Its `jtag2updi.ino` is the sketch entry
+point; the implementation is in the sibling C++ files. Rebuild the complete
+source set with the custom Windows builder and copy its output to the phone:
+
+```powershell
+$output = Join-Path $env:TEMP "uno-jtag2updi-strict-build"
+.\tools\build-uno-firmware.ps1 `
+  -SourceDirectory ".\releases\uno-jtag2updi\strict-source" `
+  -OutputDirectory $output
+Get-FileHash (Join-Path $output "jtag2updi-fixed.hex") -Algorithm SHA256
+adb push (Join-Path $output "jtag2updi-fixed.hex") `
+  /sdcard/Download/uno-jtag2updi-strict-source-build.hex
+```
+
+The expected SHA-256 is
+`19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d`.
+The Termux script checks this hash and refuses any other master image.
+Before flashing, copy the complete `andruino` directory to the phone so the
+ATtiny library is present:
+
+```powershell
+adb push andruino /sdcard/Download/
+adb push comprehensive_test_uno_node1.sh /sdcard/Download/
+```
+
+In Termux, install and run the test:
+
+```sh
+cp ~/storage/downloads/comprehensive_test_uno_node1.sh ~/
+chmod 700 ~/comprehensive_test_uno_node1.sh
+andruino-flash devices
+UNO_USB=/dev/bus/usb/001/008
+~/comprehensive_test_uno_node1.sh "$UNO_USB"
+```
+
+Use the current USB path shown by `andruino-flash devices`; it can change after
+reconnecting the Uno. If it is the only supported USB adapter, the script can
+discover the path automatically. During the run, disconnect the Uno's D5 bus
+and D6 UPDI connections from the target while the Uno master is reflashed, then
+reconnect them when prompted. Keep exactly one target connected. The script
+accepts either no responding node (for a blank first-time target) or node 1
+after the master is reflashed; it refuses to proceed if any other node address
+is discovered. The ATtiny flashing step uses `--node 1`. The script ends in
+COMM mode with the LED off and the node's UPDI gate disabled.
+
+Use `--no-flash` to rerun communication checks without reflashing either
+device:
+
+```sh
+~/comprehensive_test_uno_node1.sh --no-flash "$UNO_USB"
+```
+
+This test exercises protocol responses and the firmware's logical state only.
+The current `AndruinoBusNode` implementation does not drive the valve or motor
+hardware and returns placeholder encoder/angle values; a passing test does not
+verify an AS5600, motor, valve, or their wiring. Keep load power disconnected
+unless separately testing properly wired, current-limited hardware.
+
+There is a wiring-document mismatch to resolve before connecting an UPDI gate:
+[`ATTINY1614_NODE1_WIRING.md`](ATTINY1614_NODE1_WIRING.md) and the current node
+library use physical pin 9/PB0 for the gate, while
+[`FRESH_UPDI_CONTROL_BUS.md`](FRESH_UPDI_CONTROL_BUS.md) describes a different
+Uno D4/PB1 arrangement. Do not combine those circuits. The script targets the
+current `BlinkNode1`/`AndruinoBusNode` firmware; verify the transistor wiring
+and target's UPDI path against the actual hardware before flashing.
+
 ### Full seven-node communication and reflash test
 
 With the address-specific `BlinkNode1` through `BlinkNode7` sketches present

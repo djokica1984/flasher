@@ -41,6 +41,14 @@ matching the archived strict HEX. The custom PowerShell build is significant:
 Arduino CLI builds of this source with the Termux toolchain did not reproduce
 the image.
 
+The phone copy at
+`/storage/emulated/0/Download/strict-source-recovery/git-7f03242/jtag2updi`
+was recovered and compared against the repository snapshot: all 25 source
+files match byte-for-byte. The phone directory also contains a separately
+generated `jtag2updi.ino.hex`; that file is not the verified strict image and
+was not used. Rebuilding the repository source set with the custom builder
+again produced the expected strict-image SHA-256 above.
+
 ### Current source fingerprints
 
 SHA-256 values for the current checked-out source files:
