@@ -58,3 +58,18 @@ reads its angle, resets the accumulated count, and asks you to turn the magnet
 or shaft by hand. It verifies the accumulated count changes; it sends no motor
 or valve commands. Use `--no-flash` instead of reflashing only when this
 sensor-only firmware is already installed on Node 1.
+
+## Continuous angle output
+
+Copy `read_as5600_node1.sh` to the Termux home directory. Add `--flash` if Node
+1 is not already running the AS5600 firmware; otherwise the script verifies
+the firmware version before streaming:
+
+```sh
+chmod 700 ~/read_as5600_node1.sh
+~/read_as5600_node1.sh --flash /dev/bus/usb/001/003
+```
+
+It prints one line per reading to standard output: timestamp, raw angle
+(`0..4095`), and degrees (`raw * 360 / 4096`). The default delay is 0.5 seconds
+between requests; use `--interval 0.2` to change it. Press Ctrl+C to stop.
