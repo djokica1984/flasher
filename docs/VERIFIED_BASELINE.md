@@ -73,6 +73,61 @@ again produced the expected strict-image SHA-256 above. The default source for
 the UNO strict package so a default build cannot accidentally select the
 newer non-strict `andruino/uno/jtag2updi` tree.
 
+## HEX provenance audit
+
+The repository tracks three HEX files, all for the master MCU; it does not
+track prebuilt ATtiny1614 node HEX files. The node HEX is generated from the
+tracked sketch when `andruino-flash` builds or flashes it.
+
+| HEX | Source and reproducible build | Result |
+|---|---|---|
+| [`uno-jtag2updi-strict.hex`](../releases/uno-jtag2updi/uno-jtag2updi-strict.hex) | Exact snapshot in [`strict-source/`](../releases/uno-jtag2updi/strict-source/), built with [`build-uno-firmware.ps1`](../tools/build-uno-firmware.ps1) and the explicit `-SourceDirectory ".\releases\uno-jtag2updi\strict-source"` argument. | SHA-256 `19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d`; byte-for-byte reproduced and passed the documented Uno/Nano tests. |
+| [`jtag2updi-fixed.hex`](../releases/uno-jtag2updi/jtag2updi-fixed.hex) | [`andruino/uno/jtag2updi/`](../andruino/uno/jtag2updi/) including its `.ino`, `.cpp`, and `.h` files; use `build-uno-firmware.ps1` with `-SourceDirectory ".\andruino\uno\jtag2updi"`. | SHA-256 `19cc9817511668e7c8f416b3a98e9ec57fa4bbf329e0ced53af1ce86972f2e01`; independently rebuilt to an exact match during this audit. It is not a hardware-verified image and is not the image used by the current L298N test. |
+| [`jtag2updi-nano-old-bootloader.hex`](../releases/nano-jtag2updi/jtag2updi-nano-old-bootloader.hex) | The same [`andruino/uno/jtag2updi/`](../andruino/uno/jtag2updi/) source, compiled in Termux/Ubuntu with `arduino-cli compile --fqbn arduino:avr:nano:cpu=atmega328old`. Its 24 Arduino source files on the phone matched the tracked package. The corresponding source build is intentionally blocked by the `andruino-flash` Nano safeguard; compile directly with Arduino CLI for reproduction, but do not flash this failed comparison image. | SHA-256 `8cd615fdae4d2e67c2ce5bc51669fda72df3b801a759ead9262d0223ba23b940`; this audit reproduced the exact hash. AVRDUDE read-back succeeded, but bus discovery failed. |
+
+To reproduce the Nano-profile comparison HEX without flashing it, run in
+Termux:
+
+```sh
+OUT="$HOME/nano-jtag2updi-build"
+mkdir -p "$OUT"
+proot-distro login ubuntu -- arduino-cli compile \
+  --fqbn arduino:avr:nano:cpu=atmega328old \
+  --output-dir "$OUT" \
+  /storage/emulated/0/Download/andruino/uno/jtag2updi
+sha256sum "$OUT/jtag2updi.ino.hex"
+```
+
+The expected hash is the Nano artifact listed above. This intentionally uses
+the old-bootloader profile and does not make the failed image suitable for
+use.
+
+The L298N test's operational master is a separate, generated image—not one of
+the tracked release HEX files. Build it from
+[`andruino/uno/uno-jtag2updi-strict/`](../andruino/uno/uno-jtag2updi-strict/)
+with `build-strict-master.sh`; the expected SHA-256 is
+`da81995aad8792513af0e7d5a3aa28956d7c2c1abb465b91e2f9521ce31f96cd`.
+
+For the ATtiny1614 nodes, `BlinkNode1` through `BlinkNode7` have checked-in
+sketches and use the checked-in
+[`AndruinoBusNode` library](../andruino/attiny1614/libraries/AndruinoBusNode/).
+The L298N Node 1 sketch is
+[`L298NNode1.ino`](../andruino/attiny1614/L298NNode1/L298NNode1.ino); it is
+self-contained apart from the Arduino/megaTinyCore libraries. The Termux copy
+of this sketch and the tracked library source were hash-verified. Rebuilding
+with the documented `megaTinyCore` 2.6.11 configuration produced 8,147 bytes
+and HEX SHA-256
+`146bf6e4ad7494a80515eae4d106d19df76e271e5943eba5be020f3fc07fd987`.
+This node HEX is a build product, not a committed artifact; use the source
+sketch and `andruino-flash` to regenerate it without flashing:
+
+```sh
+ROOT=/storage/emulated/0/Download/andruino
+andruino-flash build --platform attiny1614 \
+  "$ROOT/attiny1614/L298NNode1/L298NNode1.ino"
+sha256sum "$ROOT/attiny1614/L298NNode1/L298NNode1.ino.hex"
+```
+
 ### Current source fingerprints
 
 SHA-256 values for the current checked-out source files:
