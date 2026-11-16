@@ -4,10 +4,11 @@ This document describes the Uno/Nano JTAG2UPDI control-bus architecture and the
 ATtiny1614 sketches.
 
 > **Current reproduction path:** use [REPRODUCING.md](REPRODUCING.md) and
-> [VERIFIED_BASELINE.md](VERIFIED_BASELINE.md). The single-node Uno test passed
-> on 2026-11-16. The verified master is the strict-source image built from
-> `andruino/uno/uno-jtag2updi-strict`; the ordinary Arduino CLI build of
-> `andruino/uno/jtag2updi/jtag2updi.ino` is not interchangeable with it.
+> [VERIFIED_BASELINE.md](VERIFIED_BASELINE.md). There are two verified master
+> images: the archived baseline/Nano image (`19889521...`) and the
+> MOVE-enabled Uno image (`da81995...`) used by the single-node and L298N
+> tests. They are not interchangeable. The ordinary Arduino CLI build of
+> `andruino/uno/jtag2updi/jtag2updi.ino` is neither image.
 > The seven-node results below are historical and do not validate physical
 > actuators, sensors, or UPDI isolation.
 
@@ -39,7 +40,7 @@ The system has three independent communication layers:
 andruino/
   uno/
     uno-jtag2updi-strict/
-      uno-jtag2updi-strict.ino  Verified strict-source build package
+      uno-jtag2updi-strict.ino  MOVE-enabled Uno master source
     jtag2updi/
       jtag2updi.ino              Other/legacy Arduino CLI build; not verified master
       control_bus.cpp            D5 node control protocol
@@ -130,11 +131,14 @@ Repeat the two 1 kOhm bus branches for each additional node. All nodes share mas
 
 ## 3. Shared Uno/Nano JTAG2UPDI firmware
 
-Use `andruino/uno/uno-jtag2updi-strict` as the build source for the verified
-Uno master and use the exact resulting HEX for Nano. The separate
-`andruino/uno/jtag2updi` Arduino CLI build is not the verified strict image.
-The strict package includes the control-bus integration and is built with its
-custom script, which checks the expected master HEX hash.
+The archived baseline image has SHA-256
+`19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d`; use it
+for the historical Nano result and baseline multi-node procedure. The current
+Uno package `andruino/uno/uno-jtag2updi-strict` adds bounded `MOVE` forwarding
+and a larger bus-response buffer for the L298N test. Its builder checks
+SHA-256 `da81995aad8792513af0e7d5a3aa28956d7c2c1abb465b91e2f9521ce31f96cd`;
+use this image on the Uno only. It is not the Nano HEX. The separate
+`andruino/uno/jtag2updi` Arduino CLI build is neither verified image.
 
 ### Required control-bus integration
 
@@ -322,12 +326,12 @@ arduino:avr:uno 1.8.8
 megaTinyCore:megaavr:2.6.11
 ```
 
-The same master source is compiled with the selected board profile:
-
-```sh
-andruino-flash build --platform uno "$ROOT/uno/jtag2updi"
-andruino-flash build --platform nano "$ROOT/uno/jtag2updi"
-```
+Do not use the generic Arduino CLI `build` command to create either verified
+JTAG2UPDI master image. Use the archived source/HEX for the baseline and Nano,
+or the hash-checking `build-strict-master.sh` for the MOVE-enabled Uno image,
+as described in sections 3 and 7. Arduino CLI remains the build tool for the
+ordinary Uno, Nano, and ATtiny sketches; a successful compile of
+`andruino/uno/jtag2updi` does not produce a verified master.
 
 Uno uses `arduino:avr:uno` and 115200 baud for its standard bootloader.
 Classic Nano uses `arduino:avr:nano:cpu=atmega328old` and 57600 baud for its
@@ -357,18 +361,20 @@ andruino-flash build --platform attiny1614 /storage/emulated/0/Download/andruino
 
 ## 7. Master flashing and validity requirement
 
-Build and flash the strict-source master image. For the one-node Uno baseline,
-the comprehensive script performs this build, checks its SHA-256, flashes the
-master, and verifies read-back:
+Build and flash the task-specific MOVE-enabled strict-source master. The
+single-node Uno protocol script performs this build, checks its SHA-256,
+flashes the master, and verifies read-back:
 
 ```sh
 ./comprehensive_test_uno_node1.sh
 ```
 
-For manual flashing, build the strict source package, verify the expected
-SHA-256 `19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d`,
-then pass the resulting `.hex` to `flash-platform` with the correct board
-profile. Never pass the `.ino` file to `flash-platform`.
+For manual flashing, use the hash-matched HEX for the intended test. The
+archived baseline image (`19889521...`) is stored at
+`releases/uno-jtag2updi/uno-jtag2updi-strict.hex`; the L298N and single-node
+Uno tests require the MOVE-enabled image (`da81995...`) built from
+`andruino/uno/uno-jtag2updi-strict`. Never pass an `.ino` file to
+`flash-platform`.
 
 A valid master result must include all of the following:
 

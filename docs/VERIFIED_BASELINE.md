@@ -124,6 +124,8 @@ reproduce the strict HEX.
 | Seven-node test driver | `comprehensive_test.sh` / `~/comprehensive_test_nano.sh` | `ecb89411497f106ffd1e2f1cd804a6f9f0787e5551dc716cd7342243427005d8` |
 | Single-node Uno test driver | `comprehensive_test_uno_node1.sh` / `~/comprehensive_test_uno_node1.sh` | `53a3fb9fe3aee25c9058cfc53dd1d71b673995c794cbae7efde87454c4b9df3c` |
 | Nine-point L298N test driver | `nine_point_l298_node1.sh` / `~/nine_point_l298_node1.sh` | `2ad2a26b6e4a400eb81e4219b15da00bbb593ac214e9797883a0f69b82037685` |
+| L298N Node 1 firmware source | `andruino/attiny1614/L298NNode1/L298NNode1.ino` / `/storage/emulated/0/Download/andruino/attiny1614/L298NNode1/L298NNode1.ino` | `947c5fa158a42ec02ff80702d4c7ba997d8a7c34fd3c6428cf6a315a63659702` |
+| L298N prompted hardware diagnostic | `comprehensive_test_l298_node1.sh` / `~/comprehensive_test_l298_node1.sh` | `f362ea30206ed2f06645ed89defc655cb71b6a48451883603a9810fc51813dad` |
 | Installed debug APK | `releases/andruino-flash-debug.apk` | `7bd784f6f33aab5d48d1afab35f006c75c6347bbb658f62c2ae89c5fa97a1a5f` |
 | Known-good Uno-tested master HEX | `releases/uno-jtag2updi/uno-jtag2updi-strict.hex` | `19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d` |
 | Nano-profile rebuild HEX (flash verified; bus failed) | `releases/nano-jtag2updi/jtag2updi-nano-old-bootloader.hex` | `8cd615fdae4d2e67c2ce5bc51669fda72df3b801a759ead9262d0223ba23b940` |
@@ -158,8 +160,8 @@ isolation of UPDI.
 
 ### Uno master with one ATtiny1614 Node 1 — passed
 
-On 2026-11-16, `comprehensive_test_uno_node1.sh` rebuilt the strict-source Uno
-master to the expected SHA-256
+On 2026-11-16, the then-current `comprehensive_test_uno_node1.sh` rebuilt the
+archived strict-source Uno master to SHA-256
 `19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d`, flashed
 it, and AVRDUDE verified all 15,216 bytes. It then discovered only Node 1,
 flashed `BlinkNode1.ino`, and verified all 6,140 flash bytes. The script's
@@ -225,10 +227,15 @@ stopped station (17 pulses total). The largest observed station error was
 5 counts. It ended at absolute angle 0 with motor and valve OFF.
 
 Four subsequent startup attempts also passed homing, reaching raw angles 2, 1,
-4094, and 4095 (1–2 counts from zero). Those runs were canceled during their
-forward sweeps, so they confirm homing behavior but not additional complete
-cycles. These tests used an unloaded/free shaft and do not validate a coupled
-mechanism, sustained operation, or electrical isolation of UPDI.
+4094, and 4095 (1–2 counts from zero). The first three were canceled during
+their forward sweeps. The fourth continued to a second complete cycle. It
+started the sweep at raw angle 4095 (one count from zero), with encoder
+point-zero count `-8900`, then returned to raw angle 0 with count `-8899`
+(one count from target). All 17 valve pulses completed and the outputs ended
+OFF. Its largest station error was 18 counts (about 1.58 degrees, or 3.96% of
+one ninth-circle interval), within the 32-count position limit. Both completed
+cycles used an unloaded/free shaft and do not validate a coupled mechanism,
+sustained operation, or electrical isolation of UPDI.
 
 ### Nano master — passed with exact Uno-tested image
 

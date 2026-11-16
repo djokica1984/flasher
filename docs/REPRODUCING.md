@@ -171,6 +171,7 @@ From the PC checkout, push the helper to shared Downloads:
 
 ```powershell
 adb push tools/andruino-flash /sdcard/Download/andruino-flash
+adb push releases/uno-jtag2updi/uno-jtag2updi-strict.hex /sdcard/Download/uno-jtag2updi-strict.hex
 ```
 
 In Termux, install it in `~/bin` and add that directory to the shell `PATH`:
@@ -194,17 +195,21 @@ phone sketch tree but are not required for this guide.
 
 ### Shared JTAG2UPDI firmware
 
-The canonical JTAG2UPDI source, including the control-bus extension, is
-`$ROOT/uno/jtag2updi`; use it for the Uno. **Do not build or flash that source
-for Nano.** For Nano, use only the hash-verified `uno-jtag2updi-strict.hex`
-artifact below. The CLI rejects Nano JTAG2UPDI source builds and refuses Nano
-JTAG2UPDI HEX files unless their hash matches that tested artifact. Other Nano
-sketches use `arduino:avr:nano:cpu=atmega328old` and the old-bootloader upload
-rate.
-The same D5 control-bus and D6 UPDI wiring passed the seven-node test with the
-Uno-tested master HEX uploaded to a Nano at the old-bootloader rate. A separate
-Nano-profile rebuild failed bus communication; use the archived known-good HEX
-and see the [verified baseline](VERIFIED_BASELINE.md).
+There are two different strict-source master images; do not mix their HEX
+files or hashes:
+
+- The archived baseline image is
+  `releases/uno-jtag2updi/uno-jtag2updi-strict.hex`, SHA-256
+  `19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d`.
+  It is used for the Nano test and the historical seven-node test. It does not
+  forward the bounded `MOVE` commands required by the L298N cycle.
+- The task-specific Uno image is built from
+  `$ROOT/uno/uno-jtag2updi-strict` with `build-strict-master.sh`. Its SHA-256
+  is `da81995aad8792513af0e7d5a3aa28956d7c2c1abb465b91e2f9521ce31f96cd`;
+  it includes bounded `MOVE` forwarding and the larger response buffer needed
+  by the L298N test. Use it on the Uno, not the Nano.
+- Do not substitute the ordinary Arduino CLI build from
+  `$ROOT/uno/jtag2updi`; it is not either verified image.
 
 The exact source that produced the strict HEX is saved in
 `releases/uno-jtag2updi/strict-source/` (recovered from Git commit
@@ -321,11 +326,8 @@ app opens. These are deliberately independent:
 andruino-flash flash-sketch --platform uno --usb-device "$UNO_USB" \
   "$ROOT/uno/Blink300/Blink300.ino"
 
-# Build and flash the exact strict-source JTAG2UPDI master to the Uno.
-MASTER_HEX=/storage/emulated/0/Download/uno-jtag2updi-strict-source-build.hex
-proot-distro login ubuntu -- bash \
-  "$ROOT/uno/uno-jtag2updi-strict/build-strict-master.sh" \
-  "$ROOT/uno/uno-jtag2updi-strict" "$MASTER_HEX"
+# Flash the archived baseline strict master (copied in section 4).
+MASTER_HEX=/storage/emulated/0/Download/uno-jtag2updi-strict.hex
 echo "19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d  $MASTER_HEX" | sha256sum -c -
 andruino-flash flash-platform --usb-device "$UNO_USB" uno "$MASTER_HEX"
 andruino-flash flash-sketch --platform attiny1614 --node 1 --usb-device "$UNO_USB" \
@@ -430,14 +432,11 @@ requests to the master's USB serial adapter at 19200 baud. Because JTAG2UPDI
 provides its own `main()` instead of Arduino's normal core startup, the master
 initializes the Arduino millisecond timer and enables interrupts only while
 processing a bus command. This supports SoftwareSerial reception without
-leaving periodic interrupts enabled during UPDI programming. Build and install the verified strict-source Uno programmer and all seven
+leaving periodic interrupts enabled during UPDI programming. Install the archived baseline strict-source Uno programmer and all seven
 nodes:
 
 ```sh
-MASTER_HEX=/storage/emulated/0/Download/uno-jtag2updi-strict-source-build.hex
-proot-distro login ubuntu -- bash \
-  "$ROOT/uno/uno-jtag2updi-strict/build-strict-master.sh" \
-  "$ROOT/uno/uno-jtag2updi-strict" "$MASTER_HEX"
+MASTER_HEX=/storage/emulated/0/Download/uno-jtag2updi-strict.hex
 echo "19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d  $MASTER_HEX" | sha256sum -c -
 andruino-flash flash-platform --usb-device "$UNO_USB" uno "$MASTER_HEX"
 andruino-flash flash-sketch --platform attiny1614 --usb-device "$UNO_USB" \
@@ -532,13 +531,11 @@ checks. Do not use the current `andruino/uno/jtag2updi` source with
 `flash-sketch` for this master: its Termux Arduino CLI build is not the verified
 strict image.
 
-The recovered strict source set is packaged under both
-`andruino/uno/uno-jtag2updi-strict` and
-`andruino/nano/nano-jtag2updi-strict`.
-`uno-jtag2updi-strict.ino` and `nano-jtag2updi-strict.ino` are Arduino sketch
-entry points; the implementation is in the sibling C++ files. The UNO
-package is the build source for the verified image. Rebuild the complete
-source set with the custom Windows builder and copy its output to the phone:
+The task-specific Uno source set is packaged under
+`andruino/uno/uno-jtag2updi-strict`; the recovered source snapshots are also
+packaged under `andruino/nano/nano-jtag2updi-strict`. The current Uno package
+adds bounded `MOVE` forwarding and a 128-byte response buffer. Rebuild it with
+the custom Windows builder and check its task-specific hash:
 
 ```powershell
 $output = Join-Path $env:TEMP "uno-jtag2updi-strict-build"
@@ -549,16 +546,15 @@ Get-FileHash (Join-Path $output "jtag2updi-fixed.hex") -Algorithm SHA256
 ```
 
 The expected SHA-256 is
-`19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d`.
-For the full single-node test, the Termux script builds the complete package
-using `andruino/uno/uno-jtag2updi-strict/build-strict-master.sh` in the Ubuntu
-proot, checks the output hash, and only then flashes it. This custom build uses
-the same Arduino AVR core `1.8.8` and AVR-GCC
-`7.3.0-atmel3.6.1-arduino7` as the Windows builder; it deliberately does not
-use Arduino CLI to build the master. The Nano package is a source reference for
-parity; use the UNO-built image with Nano's old-bootloader profile rather than
-independently rebuilding for Nano. No prebuilt HEX needs to be copied to the
-phone for the default single-node test.
+`da81995aad8792513af0e7d5a3aa28956d7c2c1abb465b91e2f9521ce31f96cd`.
+The Termux test builds the same package with
+`andruino/uno/uno-jtag2updi-strict/build-strict-master.sh`, checks this hash,
+and only then flashes it. This custom build uses Arduino AVR core `1.8.8` and
+AVR-GCC `7.3.0-atmel3.6.1-arduino7`; it deliberately does not use Arduino CLI
+to build the master. The Nano must use the separate archived baseline HEX with
+SHA-256 `19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d`.
+No prebuilt HEX needs to be copied to the phone for the default single-node
+protocol test.
 
 Copy the complete `andruino` directory to the phone so the strict source
 package, build helper, and ATtiny library are all present:
@@ -582,17 +578,18 @@ Use the current USB path shown by `andruino-flash devices`; it can change after
 reconnecting the Uno. If it is the only supported USB adapter, the script can
 discover the path automatically. The single-node test leaves node 1 connected
 to D5/D6 while it reflashes the Uno and ATtiny. Keep exactly one target
-connected. The script accepts either no responding node (for a blank first-time
-target) or node 1 after the master is reflashed; it refuses to proceed if any
-other node address is discovered. The ATtiny flashing step uses `--node 1`.
+connected. If the node is blank or does not respond, first flash `BlinkNode1`
+directly through the single D6-to-UPDI connection, omitting `--node`; then run
+the test. The test refuses to proceed if any address other than node 1 is
+discovered. Its normal ATtiny flash step uses `--node 1`.
 The script ends in COMM mode with the LED off and the node's logical UPDI
 selection state disabled. This is not electrical isolation; the tested setup
 has a direct D6-to-PA0 connection.
 
-The default test builds and reflashes the strict-source master, then flashes
-node 1 and runs all communication checks. If the strict-source master has just
-been reflashed and verified separately, use `--master-already-flashed`. This
-still flashes node 1 and runs all communication checks; it is not the
+The default test builds and reflashes the MOVE-enabled strict master, then
+flashes node 1 and runs all communication checks. If that strict master has
+just been reflashed and verified separately, use `--master-already-flashed`.
+This still flashes node 1 and runs all communication checks; it is not the
 communication-only `--no-flash` mode:
 
 ```sh
@@ -620,6 +617,87 @@ not electrical isolation. See
 [`ATTINY1614_NODE1_WIRING.md`](ATTINY1614_NODE1_WIRING.md) and
 [`FRESH_UPDI_CONTROL_BUS.md`](FRESH_UPDI_CONTROL_BUS.md) for their explicit
 legacy/unverified labels.
+
+### Single-node L298N/AS5600 nine-point actuator test
+
+This is the physical motor/valve test. It requires the task-specific MOVE-
+enabled Uno master (`da81995...`) and node firmware
+`ATTINY1614-L298N-AS5600-5`; the archived baseline master
+(`19889521...`) cannot forward the bounded `MOVE` commands. Keep only Node 1
+on the D5 bus and only its UPDI pin connected to Uno D6. The L298N uses the
+shared motor supply for both loads; follow the wiring, current, and cutoff
+checks in [`ATTINY1614_L298N_NODE1.md`](ATTINY1614_L298N_NODE1.md).
+
+From the PC checkout, deploy the complete sketch/source tree, CLI, and test
+drivers to shared Downloads:
+
+```powershell
+adb push andruino /sdcard/Download/
+adb push tools/andruino-flash /sdcard/Download/andruino-flash
+adb push nine_point_l298_node1.sh /sdcard/Download/
+adb push comprehensive_test_l298_node1.sh /sdcard/Download/
+```
+
+In Termux, install/update the CLI and test drivers. The `~/bin` directory must
+already be on `PATH` as described in section 4:
+
+```sh
+cp ~/storage/downloads/andruino-flash ~/bin/andruino-flash
+chmod 700 ~/bin/andruino-flash
+cp ~/storage/downloads/nine_point_l298_node1.sh ~/
+cp ~/storage/downloads/comprehensive_test_l298_node1.sh ~/
+chmod 700 ~/nine_point_l298_node1.sh ~/comprehensive_test_l298_node1.sh
+ROOT=/storage/emulated/0/Download/andruino
+andruino-flash devices
+UNO_USB=/dev/bus/usb/001/003  # replace with the current Uno adapter path
+```
+
+Build, hash-check, and flash the MOVE-enabled strict Uno master. This is a
+different image from the archived baseline/Nano HEX:
+
+```sh
+MASTER_HEX=/storage/emulated/0/Download/uno-jtag2updi-l298n.hex
+proot-distro login ubuntu -- bash \
+  "$ROOT/uno/uno-jtag2updi-strict/build-strict-master.sh" \
+  "$ROOT/uno/uno-jtag2updi-strict" "$MASTER_HEX"
+echo "da81995aad8792513af0e7d5a3aa28956d7c2c1abb465b91e2f9521ce31f96cd  $MASTER_HEX" | sha256sum -c -
+andruino-flash flash-platform --usb-device "$UNO_USB" uno "$MASTER_HEX"
+```
+
+For a blank or non-responding Node 1, provision its firmware directly over the
+single D6-to-UPDI connection before running the bus-based test. Omit `--node`
+here because a blank target cannot answer bus selection commands:
+
+```sh
+andruino-flash flash-sketch --platform attiny1614 --usb-device "$UNO_USB" \
+  "$ROOT/attiny1614/L298NNode1/L298NNode1.ino"
+```
+
+For an already responding Node 1, the default nine-point command discovers
+Node 1, reflashes the L298N sketch through the bus, verifies flash read-back,
+homes to absolute AS5600 angle 0 (within 8 counts), visits all nine stations,
+and pulses the valve at the forward and reverse stops:
+
+```sh
+~/nine_point_l298_node1.sh "$UNO_USB"
+```
+
+Use `--no-flash` only when node version 5 is already installed. It skips the
+node reflash but still runs the complete actuating cycle:
+
+```sh
+~/nine_point_l298_node1.sh --no-flash "$UNO_USB"
+```
+
+The script has no operator prompts by design, so complete every physical
+preflight check in the wiring guide before starting it; the bus checks do not
+verify pulldowns, supply ratings, current limits, free travel, or cutoff
+accessibility. Do not leave the test unattended. A successful run ends with
+`CYCLE_COMPLETE: ... 17 valve pulses; outputs OFF`; any interrupted run is not
+a completed cycle. The optional `comprehensive_test_l298_node1.sh` is a
+separate prompted motor/valve/encoder diagnostic, not a substitute for the
+nine-point cycle. Do not run `comprehensive_test_uno_node1.sh` afterward unless
+you intend to replace the L298N firmware with `BlinkNode1`.
 
 ### Full seven-node communication and reflash test
 

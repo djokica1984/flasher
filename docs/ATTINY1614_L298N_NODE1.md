@@ -7,16 +7,16 @@ protocol, `VALVE`, timed `MOTOR`, encoder commands, and local encoder-counted
 `MOVE` operations.
 
 > **Validation status:** the firmware and test remain experimental. On
-> 2026-11-16, the updated nine-position cycle completed with absolute-angle
-> homing and valve pulses on forward and reverse stops. Homing ended at raw
-> angle 4095 (one count from zero) without resetting the relative encoder;
-> station error was at most 5 counts, all 17 valve pulses completed, and the
-> outputs were verified OFF at the end. Subsequent runs also homed within
-> 1–2 counts but were canceled during the sweep. This does not validate a
-> coupled or loaded mechanism, sustained operation, or electrical isolation of
-> UPDI. The test intentionally actuates real hardware; satisfy every safety
-> precondition below before running it. It is not part of the passing
-> `BlinkNode1` baseline.
+> 2026-11-16, two updated nine-position cycles completed with absolute-angle
+> homing and valve pulses on forward and reverse stops. Both started within
+> one count of absolute angle zero, returned to zero, completed all 17 valve
+> pulses, and ended with outputs OFF. The largest station error was 5 counts
+> on the first cycle and 18 counts on the second (within the 32-count limit).
+> Three other attempts homed within 1–2 counts but were canceled during the
+> sweep. This does not validate a coupled or loaded mechanism, sustained
+> operation, or electrical isolation of UPDI. The test intentionally actuates
+> real hardware; satisfy every safety precondition below before running it. It
+> is not part of the passing `BlinkNode1` baseline.
 
 ## ATtiny1614 to L298N signal wiring
 
@@ -174,7 +174,9 @@ angle.
 
 The ATtiny performs the fast position loop locally; Termux's several-second bus
 round trip is used only for supervision and logging. Run it from a Termux shell
-after installing the updated sketch and script:
+after installing the updated sketch and script. For a clean installation,
+master build, blank-node provisioning, and exact Termux copy commands, see
+[`REPRODUCING.md`](REPRODUCING.md).
 
 ```sh
 ~/nine_point_l298_node1.sh /dev/bus/usb/001/003
