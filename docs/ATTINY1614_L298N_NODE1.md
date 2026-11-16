@@ -173,6 +173,7 @@ Termux shell after installing the updated sketch and script:
 The script requires startup confirmation of the IN1–IN4 pulldowns, the
 22 V/5 V module power configuration, the free shaft, the reachable physical
 cutoff, and a previously observed 500 ms valve pulse. There are no operator
-prompts during the station cycle. It is not a substitute for checking the
+prompts during the station cycle. It rediscovers the bus after flashing Node 1
+to refresh the Uno master's node mask. It is not a substitute for checking the
 exact L298N module's ratings or confirming the load current. Do not run it if
 the module's 5 V regulator configuration is uncertain at 22 V.

@@ -123,7 +123,7 @@ reproduce the strict HEX.
 | Termux CLI | `tools/andruino-flash` / `~/bin/andruino-flash` | `2110a6603d3e902358950795f9d4132b23e11bc6ecc6c27bb4c37850943cd28f` |
 | Seven-node test driver | `comprehensive_test.sh` / `~/comprehensive_test_nano.sh` | `ecb89411497f106ffd1e2f1cd804a6f9f0787e5551dc716cd7342243427005d8` |
 | Single-node Uno test driver | `comprehensive_test_uno_node1.sh` / `~/comprehensive_test_uno_node1.sh` | `53a3fb9fe3aee25c9058cfc53dd1d71b673995c794cbae7efde87454c4b9df3c` |
-| Nine-point L298N test driver | `nine_point_l298_node1.sh` / `~/nine_point_l298_node1.sh` | `83e0fa05129a8e330f3ae8cbaf698583c7a21d92a3a093ed36a78d0bfe1956a4` |
+| Nine-point L298N test driver | `nine_point_l298_node1.sh` / `~/nine_point_l298_node1.sh` | `d0a33c89a1156c3d86f4a86762705a5d1eb2c5f8723707e24551ff8a231ff1cb` |
 | Installed debug APK | `releases/andruino-flash-debug.apk` | `7bd784f6f33aab5d48d1afab35f006c75c6347bbb658f62c2ae89c5fa97a1a5f` |
 | Known-good Uno-tested master HEX | `releases/uno-jtag2updi/uno-jtag2updi-strict.hex` | `19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d` |
 | Nano-profile rebuild HEX (flash verified; bus failed) | `releases/nano-jtag2updi/jtag2updi-nano-old-bootloader.hex` | `8cd615fdae4d2e67c2ce5bc51669fda72df3b801a759ead9262d0223ba23b940` |

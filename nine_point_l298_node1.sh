@@ -333,14 +333,15 @@ if [[ "$valve_ready" != "VALVE" ]]; then
 fi
 
 discover_single_node
+node_available=1
 if [[ "$skip_flash" -eq 0 ]]; then
     flash_and_verify
+    discover_single_node
 else
     echo "Skipping reflash (--no-flash)."
 fi
 run_bus "OK MODE COMM" MODE COMM
 run_bus "NODE 1 VERSION $NODE_VERSION" VERSION 1
-node_available=1
 read_status
 if [[ "$STATUS_MOTOR" != "OFF" || "$STATUS_VALVE" != "OFF" ||
       "$STATUS_MOTION" != "IDLE" ]]; then
