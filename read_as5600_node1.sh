@@ -81,9 +81,33 @@ if [[ -z "$master_usb" ]]; then
     master_usb="${master_paths[0]}"
 fi
 
+discover_single_node() {
+    local output
+    if ! output="$(andruino-flash bus --usb-device "$master_usb" DISCOVER 2>&1)"; then
+        echo "DISCOVER command failed:" >&2
+        echo "$output" >&2
+        return 1
+    fi
+    if grep -Fq 'BUS_RESPONSE OK NODES NONE' <<<"$output"; then
+        echo "No node is responding yet." >&2
+        return 2
+    fi
+    if ! grep -Eq 'BUS_RESPONSE OK NODES 1$' <<<"$output"; then
+        echo "Expected only Node 1 on the bus:" >&2
+        echo "$output" >&2
+        return 1
+    fi
+    return 0
+}
+
 if [[ "$flash_node" -eq 1 ]]; then
     if [[ ! -f "$NODE_SKETCH" ]]; then
         echo "Missing AS5600 node sketch: $NODE_SKETCH" >&2
+        exit 1
+    fi
+    discovery_status=0
+    discover_single_node || discovery_status=$?
+    if [[ "$discovery_status" -ne 0 && "$discovery_status" -ne 2 ]]; then
         exit 1
     fi
     echo "Flashing AS5600 Node 1 via $master_usb..." >&2
@@ -92,6 +116,16 @@ if [[ "$flash_node" -eq 1 ]]; then
         "$NODE_SKETCH" 2>&1)"; then
         echo "Failed to flash AS5600 Node 1:" >&2
         echo "$flash_output" >&2
+        exit 1
+    fi
+    if ! discover_single_node; then
+        echo "Node 1 did not respond after flashing." >&2
+        exit 1
+    fi
+    if ! mode_output="$(andruino-flash bus --usb-device "$master_usb" MODE COMM 2>&1)" ||
+       ! grep -Fq 'BUS_RESPONSE OK MODE COMM' <<<"$mode_output"; then
+        echo "Could not restore Node 1 to COMM mode:" >&2
+        echo "$mode_output" >&2
         exit 1
     fi
     echo "$flash_output" >&2

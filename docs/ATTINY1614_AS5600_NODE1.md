@@ -4,9 +4,11 @@ This sensor-only firmware uses the existing Uno/ATtiny1614 addressed half-duplex
 bus and reads an AS5600 magnetic encoder. It does not configure or command
 motor or valve outputs.
 
-> **Validation status:** the sketch compiled, but it has not been flashed or
-> physically validated with an AS5600. It is an extension, not part of the
-> passing `BlinkNode1` baseline in [VERIFIED_BASELINE.md](VERIFIED_BASELINE.md).
+> **Validation status:** the sketch was flashed and all 5,840 bytes were
+> read-back verified. The first hardware query returned `ANGLE -1`, so I2C
+> communication and angle measurement are not yet validated. It is not part
+> of the passing `BlinkNode1` baseline in
+> [VERIFIED_BASELINE.md](VERIFIED_BASELINE.md).
 
 ## Wiring
 
@@ -72,4 +74,6 @@ chmod 700 ~/read_as5600_node1.sh
 
 It prints one line per reading to standard output: timestamp, raw angle
 (`0..4095`), and degrees (`raw * 360 / 4096`). The default delay is 0.5 seconds
-between requests; use `--interval 0.2` to change it. Press Ctrl+C to stop.
+between requests; use `--interval 0.2` to change it. With `--flash`, it
+rediscovers the bus and restores COMM mode before streaming. Press Ctrl+C to
+stop.

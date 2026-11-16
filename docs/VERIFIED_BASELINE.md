@@ -169,9 +169,10 @@ state only; no physical valve/motor movement, AS5600 readings, or UPDI
 electrical isolation was validated by this run.
 
 The separately checked-in AS5600 and L298N Node 1 sketches are extensions, not
-part of this passing baseline. Their source/build and test scripts are
-preserved for reproduction, but neither was physically validated as of this
-record.
+part of this passing baseline. The AS5600 image was built and its 5,840 flash
+bytes were read-back verified, but its first hardware query returned
+`ANGLE -1`; sensor communication and rotation measurement remain unverified.
+The L298N extension was not physically validated.
 
 ### Nano master — passed with exact Uno-tested image
 
