@@ -86,6 +86,8 @@ Use 4.7 kΩ SDA/SCL pullups to 5 V if the module does not already contain them.
 Keep the magnet centered and at the gap specified for the particular AS5600
 board. `ANGLE` returns raw counts 0–4095; `READ_ENCODER` returns signed
 accumulated counts and `RESET_ENCODER` establishes a new zero.
+The megaTinyCore default I2C route is PB1/PB0; the firmware explicitly selects
+the wired PA1/PA2 route with `Wire.pins(PIN_PA1, PIN_PA2)` before `Wire.begin()`.
 
 ## Current and safe bring-up
 

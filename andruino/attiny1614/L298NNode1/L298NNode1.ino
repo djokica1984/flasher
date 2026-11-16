@@ -385,6 +385,7 @@ void setup() {
   digitalWrite(STATUS_LED_PIN, HIGH);
   pinMode(STATUS_LED_PIN, OUTPUT);
 
+  Wire.pins(PIN_PA1, PIN_PA2);
   Wire.begin();
   Serial.begin(LINK_BAUD);
   releaseBus();
