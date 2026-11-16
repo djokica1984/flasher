@@ -3,7 +3,7 @@ set -euo pipefail
 
 source_dir="${1:?Usage: build-strict-master.sh SOURCE_DIR OUTPUT_HEX}"
 output_hex="${2:?Usage: build-strict-master.sh SOURCE_DIR OUTPUT_HEX}"
-expected_sha256="19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d"
+expected_sha256="da81995aad8792513af0e7d5a3aa28956d7c2c1abb465b91e2f9521ce31f96cd"
 
 if [[ ! -f "$source_dir/uno-jtag2updi-strict.ino" ]]; then
     echo "Missing strict Uno sketch entry point: $source_dir/uno-jtag2updi-strict.ino" >&2

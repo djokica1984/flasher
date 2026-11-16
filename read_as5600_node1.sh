@@ -5,11 +5,13 @@ export PATH="$HOME/bin:$PATH"
 
 interval_seconds="0.5"
 flash_node=0
+read_once=0
 master_usb=""
 
 usage() {
-    echo "Usage: $0 [--flash] [--interval SECONDS] [UNO_USB_PATH]"
+    echo "Usage: $0 [--flash] [--once] [--interval SECONDS] [UNO_USB_PATH]"
     echo "  --flash             Build and flash AS5600Node1 before reading"
+    echo "  --once              Read one angle and exit"
     echo "  --interval SECONDS  Delay between reads (default: 0.5)"
 }
 
@@ -17,6 +19,10 @@ while [[ "$#" -gt 0 ]]; do
     case "$1" in
         --flash)
             flash_node=1
+            shift
+            ;;
+        --once)
+            read_once=1
             shift
             ;;
         --interval)
@@ -110,6 +116,18 @@ if [[ "$flash_node" -eq 1 ]]; then
     if [[ "$discovery_status" -ne 0 && "$discovery_status" -ne 2 ]]; then
         exit 1
     fi
+    if [[ "$discovery_status" -eq 0 ]]; then
+        if ! current_version="$(andruino-flash bus --usb-device "$master_usb" VERSION 1 2>&1)"; then
+            echo "Could not query Node 1 firmware before flashing:" >&2
+            echo "$current_version" >&2
+            exit 1
+        fi
+        if grep -Fq 'NODE 1 VERSION ATTINY1614-L298N-AS5600-' <<<"$current_version"; then
+            echo "Refusing to replace the L298N actuator firmware with the sensor-only sketch." >&2
+            echo "Run without --flash to read the encoder while retaining motor/valve control." >&2
+            exit 1
+        fi
+    fi
     echo "Flashing AS5600 Node 1 via $master_usb..." >&2
     if ! flash_output="$(andruino-flash flash-sketch \
         --platform attiny1614 --node 1 --usb-device "$master_usb" \
@@ -122,8 +140,8 @@ if [[ "$flash_node" -eq 1 ]]; then
         echo "Node 1 did not respond after flashing." >&2
         exit 1
     fi
-    if ! mode_output="$(andruino-flash bus --usb-device "$master_usb" MODE COMM 2>&1)" ||
-       ! grep -Fq 'BUS_RESPONSE OK MODE COMM' <<<"$mode_output"; then
+    if ! mode_output="$(andruino-flash startup --usb-device "$master_usb" --mode COMM 2>&1)" ||
+       ! grep -Fq 'RESULT success' <<<"$mode_output"; then
         echo "Could not restore Node 1 to COMM mode:" >&2
         echo "$mode_output" >&2
         exit 1
@@ -140,13 +158,23 @@ if ! version_output="$(andruino-flash bus --usb-device "$master_usb" VERSION 1 2
     echo "$version_output" >&2
     exit 1
 fi
-if ! grep -Fq 'NODE 1 VERSION ATTINY1614-AS5600-1' <<<"$version_output"; then
-    echo "Node 1 is not running the AS5600 firmware. Run this script with --flash." >&2
+if grep -Fq 'NODE 1 VERSION ATTINY1614-AS5600-1' <<<"$version_output"; then
+    firmware_name="sensor-only"
+elif grep -Fq 'NODE 1 VERSION ATTINY1614-L298N-AS5600-' <<<"$version_output"; then
+    firmware_name="L298N with AS5600"
+else
+    echo "Node 1 firmware does not expose a supported AS5600 ANGLE command." >&2
+    echo "Use --flash only if replacing the current firmware with the sensor-only sketch is intended." >&2
     echo "$version_output" >&2
     exit 1
 fi
 
-echo "Streaming Node 1 angle readings from $master_usb; press Ctrl+C to stop." >&2
+echo "Firmware: $firmware_name" >&2
+if [[ "$read_once" -eq 1 ]]; then
+    echo "Reading one Node 1 angle from $master_usb." >&2
+else
+    echo "Streaming Node 1 angle readings from $master_usb; press Ctrl+C to stop." >&2
+fi
 echo "Output: timestamp raw-counts degrees" >&2
 
 while true; do
@@ -181,4 +209,7 @@ while true; do
         echo "$response" >&2
     fi
     sleep "$interval_seconds"
+    if [[ "$read_once" -eq 1 ]]; then
+        break
+    fi
 done

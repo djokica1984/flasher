@@ -69,18 +69,21 @@ sensor-only firmware is already installed on Node 1.
 
 ## Continuous angle output
 
-Copy `read_as5600_node1.sh` to the Termux home directory. Add `--flash` if Node
-1 is not already running the AS5600 firmware; otherwise the script verifies
-the firmware version before streaming:
+Copy `read_as5600_node1.sh` to the Termux home directory. It can read either
+the sensor-only `ATTINY1614-AS5600-1` firmware or the L298N firmware that
+exposes the same `ANGLE` command. Use `--once` for a single diagnostic read:
 
 ```sh
 chmod 700 ~/read_as5600_node1.sh
-~/read_as5600_node1.sh --flash /dev/bus/usb/001/003
+~/read_as5600_node1.sh --once /dev/bus/usb/001/003
+~/read_as5600_node1.sh /dev/bus/usb/001/003
 ```
 
 It prints one line per attempt to standard output: timestamp, raw angle
 (`0..4095`), and degrees (`raw * 360 / 4096`). If the sensor is unavailable
 (`ANGLE -1`) or a request fails, it prints a timestamped `ERROR` status and
 keeps retrying instead of exiting. The default delay is 0.5 seconds between
-requests; use `--interval 0.2` to change it. With `--flash`, it rediscovers
-the bus and restores COMM mode before streaming. Press Ctrl+C to stop.
+requests; use `--interval 0.2` to change it. `--flash` deliberately installs
+the sensor-only sketch and refuses to replace an L298N actuator firmware.
+With `--flash`, it rediscovers the bus and restores COMM mode before reading.
+Press Ctrl+C to stop.

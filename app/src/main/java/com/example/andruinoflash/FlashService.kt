@@ -154,7 +154,7 @@ class FlashService : Service() {
     ) {
         if (!BUS_COMMAND_PATTERN.matches(command)) {
             throw IllegalArgumentException(
-                "Unsupported bus command. Use PING, STATUS, VERSION, STOP, BLINK, LED, VALVE, MOTOR, MODE, or SELECT syntax."
+                "Unsupported bus command. Use PING, STATUS, VERSION, STOP, MOVE, BLINK, LED, VALVE, MOTOR, MODE, or SELECT syntax."
             )
         }
         val usbManager = getSystemService(USB_SERVICE) as UsbManager
@@ -196,9 +196,9 @@ class FlashService : Service() {
                 UsbSerialPort.STOPBITS_1,
                 UsbSerialPort.PARITY_NONE
             )
-            // JTAG2UPDI returns to its 19200-baud idle rate after host timeout.
-            // Do not toggle DTR here: that would reset the master and discard node mode.
-            Thread.sleep(CONTROL_IDLE_SETTLE_MS)
+            // Reopening the USB port does not reset the already-running master.
+            // Keep this settle short so supervised bus polling remains responsive.
+            Thread.sleep(BUS_COMMAND_SETTLE_MS)
 
             val payload = "@$command\n".toByteArray(Charsets.US_ASCII)
             port.write(payload, CONTROL_IO_TIMEOUT_MS)
@@ -293,7 +293,7 @@ class FlashService : Service() {
             "UPDI" -> tokens.size == 3 &&
                 response == "NODE ${tokens[2]} UPDI ${if (tokens[1] == "ENABLE") "ENABLED" else "DISABLED"}"
             "PING", "STATUS", "VERSION", "STOP", "READ_ENCODER", "RESET_ENCODER",
-            "MOTION_STATUS", "ANGLE", "BLINK", "LED", "VALVE", "MOTOR" -> {
+            "MOTION_STATUS", "ANGLE", "MOVE", "BLINK", "LED", "VALVE", "MOTOR" -> {
                 val node = tokens.getOrNull(1)?.toIntOrNull() ?: return false
                 val payload = response.removePrefix("NODE $node ")
                 if (payload == response) return false
@@ -303,8 +303,15 @@ class FlashService : Service() {
                     "VERSION" -> payload.startsWith("VERSION ")
                     "STOP" -> payload.startsWith("STOPPED ")
                     "READ_ENCODER", "RESET_ENCODER" -> payload.startsWith("ENCODER ")
-                    "MOTION_STATUS" -> payload.startsWith("MOTION ")
+                    "MOTION_STATUS" ->
+                        payload.startsWith("MOTION ") || payload.startsWith("MOTION_STATUS ")
                     "ANGLE" -> payload.startsWith("ANGLE ")
+                    "MOVE" -> tokens.size == 4 &&
+                        tokens[2] in setOf("FORWARD", "REVERSE") &&
+                        tokens[3].toIntOrNull()?.let { counts ->
+                            counts in 1..512 &&
+                                payload == "MOVE STARTED ${tokens[2]} COUNTS $counts"
+                        } == true
                     "BLINK" -> tokens.getOrNull(2)?.toIntOrNull()?.let { payload == "BLINK $it" } == true
                     "LED", "VALVE" -> tokens.size == 3 && payload == "${tokens[0]} ${tokens[2]}"
                     "MOTOR" -> when (tokens.getOrNull(2)) {
@@ -759,15 +766,23 @@ class FlashService : Service() {
         private const val CONTROL_IDLE_SETTLE_MS = 2500L
         private const val CONTROL_IO_TIMEOUT_MS = 500
         private const val CONTROL_RESPONSE_TIMEOUT_MS = 20000L
+        private const val BUS_COMMAND_SETTLE_MS = 250L
         private const val JTAG2UPDI_SETTLE_MS = 4000L
         private const val MAX_CONTROL_RESPONSE_LENGTH = 120
         private val DISCOVER_RESPONSE_PATTERN = Regex("OK NODES (NONE|[1-7](,[1-7])*)")
         private val NODE_STATUS_RESPONSE_PATTERN = Regex(
             "NODE [1-7] STATUS (COMM|FLASH) V=(ON|OFF) " +
-                "M=(OFF|FORWARD|REVERSE) L=(ON|OFF) U=(ON|OFF)"
+                "M=(OFF|FORWARD|REVERSE) L=(ON|OFF) U=(ON|OFF)|" +
+                "NODE [1-7] STATUS MOTOR (OFF|FORWARD|REVERSE) VALVE (ON|OFF) " +
+                "ENCODER -?[0-9]+ UPDI (ENABLED|DISABLED) MOTION (IDLE|MOVING|FAULT) " +
+                "TARGET -?[0-9]+ ANGLE -?[0-9]+"
         )
         private val BUS_COMMAND_PATTERN = Regex(
-            "(?i)(PING|STATUS|VERSION|STOP|READ_ENCODER|RESET_ENCODER|MOTION_STATUS|ANGLE) [1-7]|BLINK [1-7] [0-9]{2,5}|LED [1-7] (ON|OFF)|MODE (COMM|FLASH)|SELECT [1-7]|DISCOVER|UPDI (ENABLE|DISABLE) [1-7]|VALVE [1-7] (ON|OFF)|MOTOR [1-7] OFF|MOTOR [1-7] (FORWARD|REVERSE) ([1-9][0-9]{0,4})"
+            "(?i)(PING|STATUS|VERSION|STOP|READ_ENCODER|RESET_ENCODER|MOTION_STATUS|ANGLE) [1-7]|" +
+                "MOVE [1-7] (FORWARD|REVERSE) ([1-9]|[1-9][0-9]|[1-4][0-9]{2}|50[0-9]|51[0-2])|" +
+                "BLINK [1-7] [0-9]{2,5}|LED [1-7] (ON|OFF)|MODE (COMM|FLASH)|SELECT [1-7]|" +
+                "DISCOVER|UPDI (ENABLE|DISABLE) [1-7]|VALVE [1-7] (ON|OFF)|MOTOR [1-7] OFF|" +
+                "MOTOR [1-7] (FORWARD|REVERSE) ([1-9][0-9]{0,4})"
         )
         private const val MAX_ENCODED_ARGS_LENGTH = 100_000
         private const val MAX_AVRDUDE_ARGUMENTS = 256

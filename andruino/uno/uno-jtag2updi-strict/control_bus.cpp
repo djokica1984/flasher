@@ -19,7 +19,7 @@ const uint16_t BUS_BAUD = 2400;
 const uint16_t RESPONSE_TIMEOUT_MS = 700;
 const uint8_t REQUEST_ATTEMPTS = 3;
 const uint8_t RETRY_DELAY_MS = 20;
-const uint8_t RESPONSE_SIZE = 96;
+const uint8_t RESPONSE_SIZE = 128;
 const uint8_t EEPROM_MODE_ADDRESS = 0;
 const uint8_t EEPROM_SELECTED_ADDRESS = 1;
 const uint8_t EEPROM_MAGIC_ADDRESS = 2;
@@ -186,14 +186,24 @@ bool setNodesMode(bool communication) {
 
 void writeSystemModeResponse() {
   char result[RESPONSE_SIZE];
+  char nodes[32] = "";
+  size_t nodesLength = 0;
+  for (uint8_t node = FIRST_NODE; node <= LAST_NODE; ++node) {
+    if (!nodeIsActive(node)) continue;
+    nodesLength += snprintf(nodes + nodesLength, sizeof(nodes) - nodesLength,
+                            "%s%u", nodesLength == 0 ? "" : ",", node);
+  }
+  if (nodesLength == 0) strcpy(nodes, "NONE");
   if (selectedNode == 0) {
-    snprintf(result, sizeof(result), "OK MODE %s; NODES 1,2,3,4,5,6,7 MODE %s; SELECT NONE",
+    snprintf(result, sizeof(result), "OK MODE %s; NODES %s MODE %s; SELECT NONE",
              communicationMode ? "COMM" : "FLASH",
+             nodes,
              communicationMode ? "COMM" : "FLASH");
   } else {
     snprintf(result, sizeof(result),
-             "OK MODE %s; NODES 1,2,3,4,5,6,7 MODE %s; SELECT NODE %u",
+             "OK MODE %s; NODES %s MODE %s; SELECT NODE %u",
              communicationMode ? "COMM" : "FLASH",
+             nodes,
              communicationMode ? "COMM" : "FLASH",
              selectedNode);
   }
@@ -364,6 +374,20 @@ void handleCommand(char *line) {
       return;
     }
     snprintf(forwardedCommand, sizeof(forwardedCommand), "BLINK %s", interval);
+  } else if (strcmp(command, "MOVE") == 0) {
+    char *direction = strtok(NULL, " \t");
+    char *distance = strtok(NULL, " \t");
+    char *tail = strtok(NULL, " \t");
+    char *end = NULL;
+    const long counts = distance == NULL ? -1 : strtol(distance, &end, 10);
+    if (direction == NULL ||
+        (strcmp(direction, "FORWARD") != 0 && strcmp(direction, "REVERSE") != 0) ||
+        distance == NULL || *end != '\0' || counts < 1 || counts > 512 || tail != NULL) {
+      writeHostLine("ERR MOVE USES FORWARD|REVERSE 1..512 COUNTS");
+      return;
+    }
+    snprintf(forwardedCommand, sizeof(forwardedCommand), "MOVE %s %ld",
+             direction, counts);
   } else if (strcmp(command, "VALVE") == 0 || strcmp(command, "MOTOR") == 0) {
     char *argument = strtok(NULL, " \t");
     char *extra = strtok(NULL, " \t");

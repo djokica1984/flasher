@@ -8,11 +8,20 @@ images.
 
 ## Canonical sources
 
-- The verified master is the strict-source image below. Its complete
-  reproducible package is
-  [`andruino/uno/uno-jtag2updi-strict/`](../andruino/uno/uno-jtag2updi-strict/);
-  use its custom hash-checking builder for an Uno. Do not use
-  `flash-sketch` on `andruino/uno/jtag2updi/jtag2updi.ino` as a substitute.
+- The archived known-good master is the strict-source image below. Its exact
+  source snapshot is
+  [`releases/uno-jtag2updi/strict-source/`](../releases/uno-jtag2updi/strict-source/).
+  Do not use `flash-sketch` on `andruino/uno/jtag2updi/jtag2updi.ino` as a
+  substitute.
+- The Uno package
+  [`andruino/uno/uno-jtag2updi-strict/`](../andruino/uno/uno-jtag2updi-strict/)
+  has a task-specific, experimental `MOVE` forwarding extension and a 128-byte
+  bus-response buffer and accurate discovered-node reporting for the
+  single-node L298N test. The larger buffer is required for the detailed
+  `STATUS` reply once encoder counts reach four digits. Its builder checks
+  SHA-256
+  `da81995aad8792513af0e7d5a3aa28956d7c2c1abb465b91e2f9521ce31f96cd`; this
+  variant is not the archived known-good master or the Nano image.
   Nano must use the exact strict HEX below, uploaded with
   `arduino:avr:nano:cpu=atmega328old` (old bootloader, 57,600 baud).
   Do not treat `andruino/nano/jtag2updi/` as a Nano source of truth.
@@ -34,12 +43,13 @@ images.
 
 ### Recovered strict-image source
 
-The complete source snapshot that reproduces the strict master HEX is saved at
+The complete source snapshot that reproduces the archived strict master HEX is
+saved at
 [`releases/uno-jtag2updi/strict-source/`](../releases/uno-jtag2updi/strict-source/)
 and copied into board-specific packages at
 [`andruino/uno/uno-jtag2updi-strict/`](../andruino/uno/uno-jtag2updi-strict/)
 and [`andruino/nano/nano-jtag2updi-strict/`](../andruino/nano/nano-jtag2updi-strict/).
-The strict package—not the ordinary Arduino CLI build—reproduces the
+The archived snapshot—not the ordinary Arduino CLI build—reproduces the
 known-good master image. Rebuilding this snapshot with
 [`tools/build-uno-firmware.ps1`](../tools/build-uno-firmware.ps1), Arduino AVR
 Boards core `1.8.8`, and AVR-GCC
@@ -47,7 +57,10 @@ Boards core `1.8.8`, and AVR-GCC
 `19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d`, exactly
 matching the archived strict HEX. The custom PowerShell build is significant:
 Arduino CLI builds of this source with the Termux toolchain did not reproduce
-the image.
+the image. The Uno package has since diverged in its control-bus command parser
+to support bounded `MOVE FORWARD|REVERSE 1..512` forwarding, size the response
+buffer for the detailed L298N `STATUS` reply, and report only discovered nodes;
+its custom builder pins the resulting task-specific hash listed above.
 
 The phone copy at
 `/storage/emulated/0/Download/strict-source-recovery/git-7f03242/jtag2updi`
@@ -109,7 +122,8 @@ reproduce the strict HEX.
 |---|---|---|
 | Termux CLI | `tools/andruino-flash` / `~/bin/andruino-flash` | `2110a6603d3e902358950795f9d4132b23e11bc6ecc6c27bb4c37850943cd28f` |
 | Seven-node test driver | `comprehensive_test.sh` / `~/comprehensive_test_nano.sh` | `ecb89411497f106ffd1e2f1cd804a6f9f0787e5551dc716cd7342243427005d8` |
-| Single-node Uno test driver | `comprehensive_test_uno_node1.sh` / `~/comprehensive_test_uno_node1.sh` | `b0dc67e946a0f18d752a8379edaef1310ce74ce19d55229f9a8a930d45b32104` |
+| Single-node Uno test driver | `comprehensive_test_uno_node1.sh` / `~/comprehensive_test_uno_node1.sh` | `53a3fb9fe3aee25c9058cfc53dd1d71b673995c794cbae7efde87454c4b9df3c` |
+| Nine-point L298N test driver | `nine_point_l298_node1.sh` / `~/nine_point_l298_node1.sh` | `83e0fa05129a8e330f3ae8cbaf698583c7a21d92a3a093ed36a78d0bfe1956a4` |
 | Installed debug APK | `releases/andruino-flash-debug.apk` | `7bd784f6f33aab5d48d1afab35f006c75c6347bbb658f62c2ae89c5fa97a1a5f` |
 | Known-good Uno-tested master HEX | `releases/uno-jtag2updi/uno-jtag2updi-strict.hex` | `19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d` |
 | Nano-profile rebuild HEX (flash verified; bus failed) | `releases/nano-jtag2updi/jtag2updi-nano-old-bootloader.hex` | `8cd615fdae4d2e67c2ce5bc51669fda72df3b801a759ead9262d0223ba23b940` |
@@ -175,7 +189,29 @@ megaTinyCore default I2C pins are PB1/PB0, while the sensor was wired to
 PA1/PA2. After explicitly selecting the PA1/PA2 route with
 `Wire.pins(PIN_PA1, PIN_PA2)`, the continuous reader returned changing valid
 angles (including 2,948, 3,205, 2,955, 3,033, and 2,711 counts). The L298N
-extension was not physically validated.
+extension's nine-position cycle is recorded below.
+
+### L298N + AS5600 Node 1 nine-position cycle — passed
+
+On 2026-11-16, the updated strict-source Uno master was built with SHA-256
+`da81995aad8792513af0e7d5a3aa28956d7c2c1abb465b91e2f9521ce31f96cd` and
+AVRDUDE read-back verified all 15,648 bytes. `DISCOVER` returned only node 1;
+the master mode response also reported `NODES 1`. The connected node reported
+`ATTINY1614-L298N-AS5600-5`.
+
+An initial run stopped at point 3 because the detailed `STATUS` reply grew to
+96 characters at four-digit encoder counts, exceeding the master's 96-byte
+buffer once space for its NUL terminator was included. Increasing the strict
+master response buffer to 128 bytes fixed the failure; the same long `STATUS 1`
+reply then passed.
+
+The subsequent free-shaft cycle completed all nine unique forward stations,
+issued a 500 ms valve ON/OFF pulse at each forward station, and returned
+through stations 7 to 0 with the valve OFF. The largest observed station error
+was 1 count (the test tolerance is 32). Final `DISCOVER` still returned only
+node 1, and `STATUS`/`MOTION_STATUS` confirmed encoder count 1, `MOTION IDLE`,
+motor OFF, and valve OFF. The motor was unloaded; this does not validate a
+coupled mechanism or sustained operation.
 
 ### Nano master — passed with exact Uno-tested image
 

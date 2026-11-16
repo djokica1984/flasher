@@ -16,15 +16,21 @@ const uint16_t LINK_BAUD = 2400;
 const uint16_t BUS_TURNAROUND_MS = 10;
 const uint16_t MAX_MOTOR_MS = 2000;
 const uint16_t MAX_VALVE_ON_MS = 5000;
+const uint16_t MAX_POSITION_MOVE_COUNTS = 512;
+const uint32_t POSITION_MOVE_TIMEOUT_MS = 15000;
+const uint32_t ENCODER_STALL_TIMEOUT_MS = 3000;
+const uint16_t ENCODER_SAMPLE_INTERVAL_MS = 5;
 const uint16_t DEFAULT_BLINK_MS = 1000;
 const uint8_t AS5600_ADDRESS = 0x36;
 const uint8_t AS5600_RAW_ANGLE_HIGH = 0x0C;
 const uint16_t AS5600_HALF_RANGE = 2048;
 
 enum MotorDirection { MOTOR_OFF, MOTOR_FORWARD, MOTOR_REVERSE };
+enum MotionState { MOTION_IDLE, MOTION_MOVING, MOTION_FAULT };
 enum NodeMode { NODE_COMM, NODE_FLASH };
 
 MotorDirection motorDirection = MOTOR_OFF;
+MotionState motionState = MOTION_IDLE;
 NodeMode nodeMode = NODE_COMM;
 bool valveOn = false;
 bool encoderAvailable = false;
@@ -37,6 +43,16 @@ uint32_t motorStartedAt = 0;
 uint32_t valveStartedAt = 0;
 uint16_t lastRawAngle = 0;
 int32_t encoderPosition = 0;
+uint8_t lastI2cError = 0;
+uint8_t lastI2cDetail = 0;
+uint32_t lastEncoderSampleAt = 0;
+int32_t moveStartPosition = 0;
+int32_t moveTargetPosition = 0;
+int32_t lastMotionEncoderPosition = 0;
+uint16_t moveDistance = 0;
+int8_t moveEncoderSign = 0;
+uint32_t motionStartedAt = 0;
+uint32_t lastEncoderChangeAt = 0;
 uint16_t blinkIntervalMs = DEFAULT_BLINK_MS;
 uint32_t lastBlinkAt = 0;
 
@@ -105,31 +121,58 @@ void updateStatusLed() {
 bool readAs5600RawAngle(uint16_t &angle) {
   Wire.beginTransmission(AS5600_ADDRESS);
   Wire.write(AS5600_RAW_ANGLE_HIGH);
-  if (Wire.endTransmission(false) != 0) return false;
-  if (Wire.requestFrom(AS5600_ADDRESS, 2) != 2) return false;
-  const uint16_t high = Wire.read();
-  const uint16_t low = Wire.read();
+  const uint8_t writeStatus = Wire.endTransmission(false);
+  if (writeStatus != 0) {
+    lastI2cError = 1;
+    lastI2cDetail = writeStatus;
+    return false;
+  }
+  const uint8_t received = Wire.requestFrom(AS5600_ADDRESS, (uint8_t)2);
+  if (received != 2) {
+    lastI2cError = 2;
+    lastI2cDetail = received;
+    return false;
+  }
+  if (Wire.available() < 2) {
+    lastI2cError = 3;
+    lastI2cDetail = Wire.available();
+    return false;
+  }
+
+  const uint16_t high = (uint8_t)Wire.read();
+  const uint16_t low = (uint8_t)Wire.read();
   angle = ((high << 8) | low) & 0x0FFF;
+  lastI2cError = 0;
+  lastI2cDetail = 0;
   return true;
 }
 
-void updateEncoder() {
+bool sampleEncoder() {
   uint16_t angle;
+  lastEncoderSampleAt = millis();
   if (!readAs5600RawAngle(angle)) {
     encoderAvailable = false;
-    return;
+    encoderInitialized = false;
+    return false;
   }
   encoderAvailable = true;
   if (!encoderInitialized) {
     lastRawAngle = angle;
     encoderInitialized = true;
-    return;
+    return true;
   }
   int16_t delta = (int16_t)(angle - lastRawAngle);
   if (delta > (int16_t)AS5600_HALF_RANGE) delta -= 4096;
   if (delta < -(int16_t)AS5600_HALF_RANGE) delta += 4096;
   encoderPosition += delta;
   lastRawAngle = angle;
+  return true;
+}
+
+void updateEncoder() {
+  if (millis() - lastEncoderSampleAt >= ENCODER_SAMPLE_INTERVAL_MS) {
+    sampleEncoder();
+  }
 }
 
 void stopMotor() {
@@ -159,6 +202,8 @@ void setValve(bool on) {
 void stopAll() {
   stopMotor();
   setValve(false);
+  motionState = MOTION_IDLE;
+  moveTargetPosition = encoderPosition;
 }
 
 bool parseUnsigned(const char *text, uint16_t minimum, uint16_t maximum,
@@ -174,6 +219,61 @@ bool parseUnsigned(const char *text, uint16_t minimum, uint16_t maximum,
   return true;
 }
 
+bool startPositionMove(MotorDirection direction, uint16_t distance) {
+  if (motionState != MOTION_IDLE || motorDirection != MOTOR_OFF || valveOn) {
+    return false;
+  }
+  sampleEncoder();
+  if (!encoderAvailable) return false;
+
+  moveStartPosition = encoderPosition;
+  moveTargetPosition = moveStartPosition;
+  lastMotionEncoderPosition = encoderPosition;
+  moveDistance = distance;
+  moveEncoderSign = 0;
+  motionStartedAt = millis();
+  lastEncoderChangeAt = motionStartedAt;
+  motionState = MOTION_MOVING;
+  startMotor(direction, 0);
+  return true;
+}
+
+void updateMotion() {
+  if (motionState != MOTION_MOVING) return;
+
+  const uint32_t now = millis();
+  if (!encoderAvailable) {
+    stopMotor();
+    motionState = MOTION_FAULT;
+    return;
+  }
+
+  if (encoderPosition != lastMotionEncoderPosition) {
+    const int32_t delta = encoderPosition - lastMotionEncoderPosition;
+    lastMotionEncoderPosition = encoderPosition;
+    lastEncoderChangeAt = now;
+    if (moveEncoderSign == 0) {
+      moveEncoderSign = delta > 0 ? 1 : -1;
+      moveTargetPosition =
+          moveStartPosition + (int32_t)moveEncoderSign * moveDistance;
+    }
+
+    const int32_t progress =
+        (encoderPosition - moveStartPosition) * moveEncoderSign;
+    if (progress >= moveDistance) {
+      stopMotor();
+      motionState = MOTION_IDLE;
+      return;
+    }
+  }
+
+  if (now - motionStartedAt >= POSITION_MOVE_TIMEOUT_MS ||
+      now - lastEncoderChangeAt >= ENCODER_STALL_TIMEOUT_MS) {
+    stopMotor();
+    motionState = MOTION_FAULT;
+  }
+}
+
 void sendStatus() {
   updateEncoder();
   responseHeader(F("STATUS MOTOR "));
@@ -185,6 +285,13 @@ void sendStatus() {
   Serial.print(encoderAvailable ? encoderPosition : -999999);
   Serial.print(F(" UPDI "));
   Serial.print(digitalRead(UPDI_GATE_PIN) == LOW ? F("ENABLED") : F("DISABLED"));
+  Serial.print(F(" MOTION "));
+  Serial.print(motionState == MOTION_MOVING ? F("MOVING") :
+      motionState == MOTION_FAULT ? F("FAULT") : F("IDLE"));
+  Serial.print(F(" TARGET "));
+  Serial.print(moveTargetPosition);
+  Serial.print(F(" ANGLE "));
+  Serial.print(encoderAvailable ? lastRawAngle : 4096);
   finishResponse();
 }
 
@@ -237,7 +344,7 @@ void handleCommand(char *line) {
     return;
   }
   if (!strcmp(command, "VERSION") && !argument) {
-    responseHeader(F("VERSION ATTINY1614-L298N-AS5600-1"));
+    responseHeader(F("VERSION ATTINY1614-L298N-AS5600-5"));
     finishResponse();
     return;
   }
@@ -290,7 +397,8 @@ void handleCommand(char *line) {
   if (!strcmp(command, "VALVE") && argument && !strtok(NULL, " \t") &&
       (!strcmp(argument, "ON") || !strcmp(argument, "OFF"))) {
     const bool turnOn = !strcmp(argument, "ON");
-    if (turnOn && motorDirection != MOTOR_OFF) {
+    if (turnOn && (motorDirection != MOTOR_OFF ||
+                   motionState != MOTION_IDLE)) {
       sendResponse(F("ERR BUSY"));
       return;
     }
@@ -299,6 +407,30 @@ void handleCommand(char *line) {
     Serial.print(valveOn ? F("ON") : F("OFF"));
     finishResponse();
     return;
+  }
+  if (!strcmp(command, "MOVE") && argument) {
+    const bool validDirection =
+        !strcmp(argument, "FORWARD") || !strcmp(argument, "REVERSE");
+    char *distanceText = strtok(NULL, " \t");
+    uint16_t distance;
+    if (validDirection &&
+        parseUnsigned(distanceText, 1, MAX_POSITION_MOVE_COUNTS, distance) &&
+        !strtok(NULL, " \t")) {
+      const MotorDirection direction =
+          !strcmp(argument, "FORWARD") ? MOTOR_FORWARD : MOTOR_REVERSE;
+      if (!encoderAvailable) {
+        sendResponse(F("ERR ENCODER UNAVAILABLE"));
+      } else if (!startPositionMove(direction, distance)) {
+        sendResponse(F("ERR BUSY"));
+      } else {
+        responseHeader(F("MOVE STARTED "));
+        Serial.print(argument);
+        Serial.print(F(" COUNTS "));
+        Serial.print(distance);
+        finishResponse();
+      }
+      return;
+    }
   }
   if (!strcmp(command, "MOTOR") && argument) {
     if (!strcmp(argument, "OFF") && !strtok(NULL, " \t")) {
@@ -311,7 +443,7 @@ void handleCommand(char *line) {
     if ((!strcmp(argument, "FORWARD") || !strcmp(argument, "REVERSE")) &&
         parseUnsigned(durationText, 1, MAX_MOTOR_MS, duration) &&
         !strtok(NULL, " \t")) {
-      if (valveOn) {
+      if (valveOn || motionState != MOTION_IDLE) {
         sendResponse(F("ERR BUSY"));
         return;
       }
@@ -326,20 +458,36 @@ void handleCommand(char *line) {
       return;
     }
   }
-  if (!strcmp(command, "MOTION_STATUS") && !argument) {
-    responseHeader(F("MOTION MOTOR "));
-    Serial.print(motorDirection == MOTOR_FORWARD ? F("FORWARD") :
-        motorDirection == MOTOR_REVERSE ? F("REVERSE") : F("OFF"));
-    Serial.print(F(" VALVE "));
-    Serial.print(valveOn ? F("ON") : F("OFF"));
+  if (!strcmp(command, "MOTION_STATUS")) {
+    updateEncoder();
+    responseHeader(F("MOTION_STATUS "));
+    Serial.print(motionState == MOTION_MOVING ? F("MOVING") :
+        motionState == MOTION_FAULT ? F("FAULT") : F("IDLE"));
+    Serial.print(F(" ENCODER "));
+    Serial.print(encoderAvailable ? encoderPosition : -999999);
+    Serial.print(F(" TARGET "));
+    Serial.print(moveTargetPosition);
+    Serial.print(F(" ANGLE "));
+    Serial.print(encoderAvailable ? lastRawAngle : 4096);
     finishResponse();
     return;
   }
   if (!strcmp(command, "ANGLE") && !argument) {
-    uint16_t angle;
     responseHeader(F("ANGLE "));
-    if (readAs5600RawAngle(angle)) Serial.print(angle);
-    else Serial.print(-1);
+    if (sampleEncoder()) Serial.print(lastRawAngle);
+    else {
+      Serial.print(-1);
+      if (lastI2cError == 1) {
+        Serial.print(F(" I2C_WRITE_STATUS "));
+        Serial.print(lastI2cDetail);
+      } else if (lastI2cError == 2) {
+        Serial.print(F(" I2C_READ_COUNT "));
+        Serial.print(lastI2cDetail);
+      } else {
+        Serial.print(F(" I2C_DATA_COUNT "));
+        Serial.print(lastI2cDetail);
+      }
+    }
     finishResponse();
     return;
   }
@@ -360,10 +508,11 @@ void handleCommand(char *line) {
     lastRawAngle = angle;
     encoderInitialized = true;
     encoderAvailable = true;
+    lastEncoderSampleAt = millis();
     sendResponse(F("ENCODER 0"));
     return;
   }
-  if (!strcmp(command, "STATUS") && !argument) {
+  if (!strcmp(command, "STATUS")) {
     sendStatus();
     return;
   }
@@ -375,6 +524,8 @@ void setup() {
   digitalWrite(MOTOR_IN2_PIN, LOW);
   digitalWrite(VALVE_IN1_PIN, LOW);
   digitalWrite(VALVE_IN2_PIN, LOW);
+  Wire.pins(PIN_PA1, PIN_PA2);
+
   pinMode(MOTOR_IN1_PIN, OUTPUT);
   pinMode(MOTOR_IN2_PIN, OUTPUT);
   pinMode(VALVE_IN1_PIN, OUTPUT);
@@ -385,11 +536,10 @@ void setup() {
   digitalWrite(STATUS_LED_PIN, HIGH);
   pinMode(STATUS_LED_PIN, OUTPUT);
 
-  Wire.pins(PIN_PA1, PIN_PA2);
   Wire.begin();
   Serial.begin(LINK_BAUD);
   releaseBus();
-  updateEncoder();
+  sampleEncoder();
   lastBlinkAt = millis();
 }
 
@@ -398,7 +548,8 @@ void loop() {
   static uint8_t length = 0;
   static bool overflow = false;
 
-  if (motorDirection != MOTOR_OFF && millis() - motorStartedAt >= motorRunDuration) {
+  if (motorDirection != MOTOR_OFF && motorRunDuration > 0 &&
+      millis() - motorStartedAt >= motorRunDuration) {
     stopMotor();
   }
   if (valveOn && millis() - valveStartedAt >= MAX_VALVE_ON_MS) {
@@ -406,6 +557,7 @@ void loop() {
   }
   updateStatusLed();
   updateEncoder();
+  updateMotion();
   while (Serial.available()) {
     const char character = (char)Serial.read();
     if (character == '\n') {

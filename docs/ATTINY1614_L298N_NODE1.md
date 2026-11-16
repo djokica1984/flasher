@@ -3,11 +3,15 @@
 This node uses an ATtiny1614 at 5 V with the Uno D5 half-duplex bus, an L298N
 dual H-bridge, an AS5600 I2C encoder, and the existing active-low LED on
 physical pin 3. Its firmware supports the Uno's `MODE`/`SELECT` flashing
-protocol, `VALVE`, timed `MOTOR`, `STOP`, and encoder commands.
+protocol, `VALVE`, timed `MOTOR`, encoder commands, and local encoder-counted
+`MOVE` operations.
 
-> **Validation status:** the firmware and test script are experimental and
-> have not been physically validated with a motor, valve, or encoder. The test
-> intentionally actuates real hardware; satisfy every safety precondition
+> **Validation status:** the firmware and test remain experimental. On
+> 2026-11-16, the nine-position cycle completed with the free-shaft motor,
+> AS5600, and valve; all station errors were at most 1 encoder count, and the
+> outputs were verified OFF at the end. This does not validate a coupled or
+> loaded mechanism, sustained operation, or electrical isolation of UPDI. The
+> test intentionally actuates real hardware; satisfy every safety precondition
 > below before running it. It is not part of the passing `BlinkNode1` baseline.
 
 ## ATtiny1614 to L298N signal wiring
@@ -43,8 +47,16 @@ the ATtiny is reset or being programmed.
 
 Connect L298N OUT1/OUT2 to the motor and OUT3/OUT4 to the valve coil. `FORWARD`
 is defined by the motor lead polarity on OUT1/OUT2; swap those two motor leads
-if the physical direction is opposite. The firmware limits each motor command
-to 2 seconds and automatically turns the valve output off after 5 seconds.
+if the physical direction is opposite. The firmware limits each timed `MOTOR`
+command to 2 seconds and automatically turns the valve output off after
+5 seconds. `MOVE FORWARD|REVERSE <counts>` instead samples the encoder on the
+ATtiny and stops at the requested relative count distance. A position move is
+limited to 512 counts and stops on encoder loss, a 3-second encoder stall, or
+a 15-second move timeout, reporting `FAULT` on an abort. With ENA/ENB jumpers
+fitted, motion is at full supply voltage; encoder feedback cannot guarantee
+precise stopping if the motor is too fast for the firmware's sample/stop
+latency. The encoder is sampled locally every 5 ms, matching the sensor-only
+firmware's known-good sampling cadence.
 
 ## Power and bus wiring
 
@@ -61,8 +73,8 @@ to 2 seconds and automatically turns the valve output off after 5 seconds.
   ATtiny/Uno ground.
 - The two L298N channels share one motor-supply input (`Vs`, often labelled
   `+12V`). Both the motor and valve therefore receive that same supply voltage.
-  At the stated 19 V supply, a 24 V-rated valve may not pull in reliably. Do not
-  put a lower-voltage coil on this rail.
+  At the reported 22 V, confirm that both loads and the exact module are rated
+  for the rail; a 24 V load may not deliver its full rated performance.
 - For common L298N modules, when `Vs` is above 12 V, remove the `5V-EN`
   regulator jumper and feed the module's logic 5 V terminal from a regulated
   5 V rail. Check the exact module markings/schematic; never parallel its
@@ -91,11 +103,10 @@ the wired PA1/PA2 route with `Wire.pins(PIN_PA1, PIN_PA2)` before `Wire.begin()`
 
 ## Current and safe bring-up
 
-The JGY370 name covers multiple motor/gearbox variants; do not infer stall
-current from the family name. Verify the exact motor and valve current ratings
-against the L298N chip **and the actual module's** thermal/current limits before
-actuation. Generic module current claims are not a substitute for its schematic
-or a datasheet.
+The motor and valve current estimates are not substitutes for their ratings.
+Verify both loads against the L298N chip **and the actual module's**
+thermal/current limits before actuation. Generic module current claims are not
+a substitute for its schematic or a datasheet.
 
 To measure the L298N channel current through its sense path, first identify the
 module's SENSE A/SENSE B resistor and its value from the board schematic or
@@ -108,7 +119,7 @@ in current mode across the supply or motor terminals. Do not lock/stall the
 motor to measure stall current; use the exact motor datasheet or a suitable
 current-limited test method.
 
-The real-peripheral test requires:
+The real-peripheral tests require:
 
 1. IN1–IN4 pulldowns installed or confirmed on the exact module.
 2. The module's 5 V regulator/jumper configured for the actual `Vs` voltage.
@@ -133,3 +144,35 @@ whether the valve physically actuated. The firmware replies and encoder values
 cannot independently prove that the valve moved; the operator must observe it.
 If a command or SSH link fails, use the physical supply cutoff: remote `STOP`
 is not an emergency stop.
+
+## Nine-position motor/valve cycle
+
+The separate `nine_point_l298_node1.sh` test requires the task-specific strict
+Uno master build with bounded `MOVE` forwarding; the archived known-good master
+does not forward that command. It flashes node firmware version
+`ATTINY1614-L298N-AS5600-5` by default. It defines the current shaft angle as
+point 0 and visits only the nine unique AS5600 positions: 0, 455, 910, 1365,
+1820, 2276, 2731, 3186, and 3641 counts relative to the start. The first move
+to point 1 also establishes the encoder's forward sign. The valve pulses ON
+for 500 ms and OFF at each stopped station. After point 8, the motor returns
+in reverse through points 7 to 0 with the valve OFF; it does not make an extra
+full revolution to duplicate point 0. The test stops on encoder errors,
+direction mismatch, motion timeout, or position error greater than 32 counts.
+Like the Nano point-cycle test, it polls the compact `MOTION_STATUS` response
+while moving and verifies full motor/valve `STATUS` only when stopped. It logs
+timestamped motion state, accumulated counts, target, and raw angle.
+
+The ATtiny performs the fast position loop locally; Termux's several-second bus
+round trip is used only for supervision and logging. Run it from an interactive
+Termux shell after installing the updated sketch and script:
+
+```sh
+~/nine_point_l298_node1.sh /dev/bus/usb/001/003
+```
+
+The script requires startup confirmation of the IN1–IN4 pulldowns, the
+22 V/5 V module power configuration, the free shaft, the reachable physical
+cutoff, and a previously observed 500 ms valve pulse. There are no operator
+prompts during the station cycle. It is not a substitute for checking the
+exact L298N module's ratings or confirming the load current. Do not run it if
+the module's 5 V regulator configuration is uncertain at 22 V.
