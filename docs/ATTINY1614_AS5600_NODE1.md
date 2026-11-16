@@ -4,10 +4,11 @@ This sensor-only firmware uses the existing Uno/ATtiny1614 addressed half-duplex
 bus and reads an AS5600 magnetic encoder. It does not configure or command
 motor or valve outputs.
 
-> **Validation status:** the sketch was flashed and all 5,840 bytes were
-> read-back verified. The first hardware query returned `ANGLE -1`, so I2C
-> communication and angle measurement are not yet validated. It is not part
-> of the passing `BlinkNode1` baseline in
+> **Validation status:** with `Wire.pins(PIN_PA1, PIN_PA2)` explicitly set,
+> the AS5600 sketch flashed and returned changing angle readings on the
+> connected hardware. The initial failure was the megaTinyCore default I2C
+> route using PB1/PB0 instead of the wired PA1/PA2 pins. This sensor test is
+> separate from the `BlinkNode1` communication baseline in
 > [VERIFIED_BASELINE.md](VERIFIED_BASELINE.md).
 
 ## Wiring
@@ -31,7 +32,12 @@ Connect the AS5600:
 
 Use SDA/SCL pull-ups to a voltage supported by both the breakout and the
 ATtiny1614. Keep the magnet centered and at the gap specified for the encoder
-board. No motor or valve wiring is needed for this test.
+board. No motor or valve wiring is needed for this test. The ATtiny1614
+megaTinyCore default I2C route is PB1/PB0, so this sketch explicitly selects
+the alternate PA1/PA2 route with `Wire.pins(PIN_PA1, PIN_PA2)` before
+`Wire.begin()`. The pull-ups must be connected to the correct I2C logic supply;
+2.2–4.7 kΩ is a practical starting range for short wiring if the module does
+not already have pull-ups.
 
 ## Angle and commands
 

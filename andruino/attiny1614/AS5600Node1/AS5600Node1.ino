@@ -23,6 +23,8 @@ bool encoderInitialized = false;
 uint16_t lastRawAngle = 0;
 int32_t encoderPosition = 0;
 uint32_t lastEncoderSampleAt = 0;
+uint8_t lastI2cError = 0;
+uint8_t lastI2cDetail = 0;
 
 void releaseBus() {
   USART0.CTRLB &= (uint8_t)~USART_TXEN_bm;
@@ -63,13 +65,29 @@ void updateUpdiGate() {
 bool readAs5600RawAngle(uint16_t &angle) {
   Wire.beginTransmission(AS5600_ADDRESS);
   Wire.write(AS5600_RAW_ANGLE_HIGH);
-  if (Wire.endTransmission(false) != 0) return false;
-  if (Wire.requestFrom(AS5600_ADDRESS, (uint8_t)2) != 2) return false;
-  if (Wire.available() < 2) return false;
+  const uint8_t writeStatus = Wire.endTransmission(false);
+  if (writeStatus != 0) {
+    lastI2cError = 1;
+    lastI2cDetail = writeStatus;
+    return false;
+  }
+  const uint8_t received = Wire.requestFrom(AS5600_ADDRESS, (uint8_t)2);
+  if (received != 2) {
+    lastI2cError = 2;
+    lastI2cDetail = received;
+    return false;
+  }
+  if (Wire.available() < 2) {
+    lastI2cError = 3;
+    lastI2cDetail = Wire.available();
+    return false;
+  }
 
   const uint16_t high = (uint8_t)Wire.read();
   const uint16_t low = (uint8_t)Wire.read();
   angle = ((high << 8) | low) & 0x0FFF;
+  lastI2cError = 0;
+  lastI2cDetail = 0;
   return true;
 }
 
@@ -111,6 +129,16 @@ void reportAngle() {
     encoderAvailable = false;
     encoderInitialized = false;
     Serial.print(-1);
+    if (lastI2cError == 1) {
+      Serial.print(F(" I2C_WRITE_STATUS "));
+      Serial.print(lastI2cDetail);
+    } else if (lastI2cError == 2) {
+      Serial.print(F(" I2C_READ_COUNT "));
+      Serial.print(lastI2cDetail);
+    } else {
+      Serial.print(F(" I2C_DATA_COUNT "));
+      Serial.print(lastI2cDetail);
+    }
   }
   finishResponse();
 }
@@ -232,6 +260,7 @@ void handleCommand(char *line) {
 void setup() {
   digitalWrite(UPDI_GATE_PIN, LOW);
   pinMode(UPDI_GATE_PIN, OUTPUT);
+  Wire.pins(PIN_PA1, PIN_PA2);
   Wire.begin();
   Serial.begin(LINK_BAUD);
   releaseBus();

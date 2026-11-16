@@ -161,8 +161,12 @@ while true; do
     if [[ "$response" =~ NODE[[:space:]]1[[:space:]]ANGLE[[:space:]](-?[0-9]+) ]]; then
         angle="${BASH_REMATCH[1]}"
         if [[ "$angle" == "-1" ]]; then
-            printf '%s ERROR SENSOR_UNAVAILABLE\n' "$timestamp"
-            echo "AS5600 returned ANGLE -1; check sensor power, I2C wiring, and pull-ups." >&2
+            diagnostic="I2C_FAILURE"
+            if [[ "$response" =~ (I2C_[[:alnum:]_]+[[:space:]]+[0-9]+) ]]; then
+                diagnostic="${BASH_REMATCH[1]// /_}"
+            fi
+            printf '%s ERROR SENSOR_UNAVAILABLE %s\n' "$timestamp" "$diagnostic"
+            echo "AS5600 I2C read failed ($diagnostic); check sensor power, I2C wiring, and pull-ups." >&2
         elif (( angle >= 0 && angle <= 4095 )); then
             degrees="$(awk -v raw="$angle" 'BEGIN { printf "%.2f", raw * 360 / 4096 }')"
             printf '%s %s %s\n' "$timestamp" "$angle" "$degrees"
