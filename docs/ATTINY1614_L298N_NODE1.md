@@ -7,12 +7,16 @@ protocol, `VALVE`, timed `MOTOR`, encoder commands, and local encoder-counted
 `MOVE` operations.
 
 > **Validation status:** the firmware and test remain experimental. On
-> 2026-11-16, the nine-position cycle completed with the free-shaft motor,
-> AS5600, and valve; all station errors were at most 1 encoder count, and the
-> outputs were verified OFF at the end. This does not validate a coupled or
-> loaded mechanism, sustained operation, or electrical isolation of UPDI. The
-> test intentionally actuates real hardware; satisfy every safety precondition
-> below before running it. It is not part of the passing `BlinkNode1` baseline.
+> 2026-11-16, the updated nine-position cycle completed with absolute-angle
+> homing and valve pulses on forward and reverse stops. Homing ended at raw
+> angle 4095 (one count from zero) without resetting the relative encoder;
+> station error was at most 5 counts, all 17 valve pulses completed, and the
+> outputs were verified OFF at the end. Subsequent runs also homed within
+> 1–2 counts but were canceled during the sweep. This does not validate a
+> coupled or loaded mechanism, sustained operation, or electrical isolation of
+> UPDI. The test intentionally actuates real hardware; satisfy every safety
+> precondition below before running it. It is not part of the passing
+> `BlinkNode1` baseline.
 
 ## ATtiny1614 to L298N signal wiring
 
@@ -150,30 +154,38 @@ is not an emergency stop.
 The separate `nine_point_l298_node1.sh` test requires the task-specific strict
 Uno master build with bounded `MOVE` forwarding; the archived known-good master
 does not forward that command. It flashes node firmware version
-`ATTINY1614-L298N-AS5600-5` by default. It defines the current shaft angle as
-point 0 and visits only the nine unique AS5600 positions: 0, 455, 910, 1365,
-1820, 2276, 2731, 3186, and 3641 counts relative to the start. The first move
-to point 1 also establishes the encoder's forward sign. The valve pulses ON
-for 500 ms and OFF at each stopped station. After point 8, the motor returns
-in reverse through points 7 to 0 with the valve OFF; it does not make an extra
-full revolution to duplicate point 0. The test stops on encoder errors,
+`ATTINY1614-L298N-AS5600-5` by default. Before the cycle, it homes the shaft
+to the AS5600 absolute angle 0 (within 8 counts) using the shortest direction.
+If the shaft is outside that tolerance, a 32-count forward probe identifies
+the encoder direction, and homing proceeds in moves of at most 512 counts.
+The relative encoder count is not reset; its value at absolute home becomes
+point 0. The test then visits the nine unique AS5600 positions: 0, 455, 910,
+1365, 1820, 2276, 2731, 3186, and 3641 counts relative to that point. The first
+move to point 1 also establishes the cycle's forward sign. The valve pulses ON
+for 500 ms and OFF at every stopped station, both on the forward sweep and on
+the reverse return through stations 7 to 0. Point 0 is pulsed at both ends, for
+17 pulses total. The cycle does not make an extra full revolution to duplicate
+point 0. The test stops on encoder errors,
 direction mismatch, motion timeout, or position error greater than 32 counts.
 Like the Nano point-cycle test, it polls the compact `MOTION_STATUS` response
-while moving and verifies full motor/valve `STATUS` only when stopped. It logs
-timestamped motion state, accumulated counts, target, and raw angle.
+without an extra polling delay and verifies full motor/valve `STATUS` only when
+stopped. It logs timestamped motion state, accumulated counts, target, and raw
+angle.
 
 The ATtiny performs the fast position loop locally; Termux's several-second bus
-round trip is used only for supervision and logging. Run it from an interactive
-Termux shell after installing the updated sketch and script:
+round trip is used only for supervision and logging. Run it from a Termux shell
+after installing the updated sketch and script:
 
 ```sh
 ~/nine_point_l298_node1.sh /dev/bus/usb/001/003
 ```
 
-The script requires startup confirmation of the IN1–IN4 pulldowns, the
-22 V/5 V module power configuration, the free shaft, the reachable physical
-cutoff, and a previously observed 500 ms valve pulse. There are no operator
-prompts during the station cycle. It rediscovers the bus after flashing Node 1
-to refresh the Uno master's node mask. It is not a substitute for checking the
-exact L298N module's ratings or confirming the load current. Do not run it if
-the module's 5 V regulator configuration is uncertain at 22 V.
+Before running, verify the IN1–IN4 pulldowns, the 22 V/5 V module power
+configuration, the free shaft, the reachable physical cutoff, and that the
+500 ms valve pulse actuates and releases. The script does not prompt for these
+checks; it actuates immediately after its bus/firmware checks pass. It
+rediscovers the bus after flashing Node 1 to refresh the Uno master's node
+mask. Motion-status polls have no added sleep; USB/bus turnaround and the
+500 ms valve pulse remain. It is not a substitute for checking the exact
+L298N module's ratings or confirming the load current. Do not run it if the
+module's 5 V regulator configuration is uncertain at 22 V.

@@ -123,7 +123,7 @@ reproduce the strict HEX.
 | Termux CLI | `tools/andruino-flash` / `~/bin/andruino-flash` | `2110a6603d3e902358950795f9d4132b23e11bc6ecc6c27bb4c37850943cd28f` |
 | Seven-node test driver | `comprehensive_test.sh` / `~/comprehensive_test_nano.sh` | `ecb89411497f106ffd1e2f1cd804a6f9f0787e5551dc716cd7342243427005d8` |
 | Single-node Uno test driver | `comprehensive_test_uno_node1.sh` / `~/comprehensive_test_uno_node1.sh` | `53a3fb9fe3aee25c9058cfc53dd1d71b673995c794cbae7efde87454c4b9df3c` |
-| Nine-point L298N test driver | `nine_point_l298_node1.sh` / `~/nine_point_l298_node1.sh` | `d0a33c89a1156c3d86f4a86762705a5d1eb2c5f8723707e24551ff8a231ff1cb` |
+| Nine-point L298N test driver | `nine_point_l298_node1.sh` / `~/nine_point_l298_node1.sh` | `2ad2a26b6e4a400eb81e4219b15da00bbb593ac214e9797883a0f69b82037685` |
 | Installed debug APK | `releases/andruino-flash-debug.apk` | `7bd784f6f33aab5d48d1afab35f006c75c6347bbb658f62c2ae89c5fa97a1a5f` |
 | Known-good Uno-tested master HEX | `releases/uno-jtag2updi/uno-jtag2updi-strict.hex` | `19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d` |
 | Nano-profile rebuild HEX (flash verified; bus failed) | `releases/nano-jtag2updi/jtag2updi-nano-old-bootloader.hex` | `8cd615fdae4d2e67c2ce5bc51669fda72df3b801a759ead9262d0223ba23b940` |
@@ -212,6 +212,23 @@ was 1 count (the test tolerance is 32). Final `DISCOVER` still returned only
 node 1, and `STATUS`/`MOTION_STATUS` confirmed encoder count 1, `MOTION IDLE`,
 motor OFF, and valve OFF. The motor was unloaded; this does not validate a
 coupled mechanism or sustained operation.
+
+That first completed cycle used the then-current shaft angle as point 0 and
+reset the relative count. A subsequent run of the updated script completed
+absolute-angle homing and the full forward/reverse cycle. Starting from the
+previous absolute reading of 251, its 32-count forward probe established motor
+direction; a 218-count forward move ended at raw angle 4095, one count from
+zero and within the 8-count homing tolerance. The relative count at home was
+`-708`, confirming it was not reset. The cycle then visited all nine forward
+stations, returned through stations 7 to 0, and pulsed the valve at each
+stopped station (17 pulses total). The largest observed station error was
+5 counts. It ended at absolute angle 0 with motor and valve OFF.
+
+Four subsequent startup attempts also passed homing, reaching raw angles 2, 1,
+4094, and 4095 (1–2 counts from zero). Those runs were canceled during their
+forward sweeps, so they confirm homing behavior but not additional complete
+cycles. These tests used an unloaded/free shaft and do not validate a coupled
+mechanism, sustained operation, or electrical isolation of UPDI.
 
 ### Nano master — passed with exact Uno-tested image
 

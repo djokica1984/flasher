@@ -36,6 +36,7 @@ NODE_SKETCH="$SKETCH_ROOT/attiny1614/L298NNode1/L298NNode1.ino"
 NODE_VERSION="ATTINY1614-L298N-AS5600-5"
 VALVE_PULSE_MS=500
 POSITION_TOLERANCE_COUNTS=32
+HOME_TOLERANCE_COUNTS=8
 node_available=0
 
 if [[ -z "$master_usb" ]]; then
@@ -211,7 +212,6 @@ run_position_move() {
             echo "PASS: MOVE $direction requested=$distance actual=$delta"
             return 0
         fi
-        sleep 1
     done
     echo "FAIL: position move exceeded host timeout." >&2
     return 1
@@ -249,6 +249,52 @@ move_to_encoder_target() {
         return 1
     fi
     echo "PASS: station target=$target actual=$STATUS_ENCODER error=$error angle=$STATUS_ANGLE"
+}
+
+home_to_absolute_zero() {
+    local angle_delta distance direction expected_sign
+
+    read_status || return 1
+    if [[ "$STATUS_MOTOR" != "OFF" || "$STATUS_VALVE" != "OFF" ||
+          "$STATUS_MOTION" != "IDLE" ]]; then
+        echo "FAIL: cannot home unless motor, valve, and motion are idle: $STATUS_RESPONSE" >&2
+        return 1
+    fi
+
+    angle_delta=$(((4096 - STATUS_ANGLE + 2048) % 4096 - 2048))
+    distance="${angle_delta#-}"
+    if (( distance <= HOME_TOLERANCE_COUNTS )); then
+        echo "PASS: already at absolute angle $STATUS_ANGLE (home tolerance ${HOME_TOLERANCE_COUNTS} counts)"
+        HOME_FORWARD_SIGN=0
+        return 0
+    fi
+
+    echo "Calibrating forward direction before homing to AS5600 angle 0."
+    run_position_move FORWARD 32 0 || return 1
+    HOME_FORWARD_SIGN=1
+    if (( MOVE_RESULT_DELTA < 0 )); then HOME_FORWARD_SIGN=-1; fi
+    read_status || return 1
+
+    while true; do
+        angle_delta=$(((4096 - STATUS_ANGLE + 2048) % 4096 - 2048))
+        distance="${angle_delta#-}"
+        if (( distance <= HOME_TOLERANCE_COUNTS )); then
+            echo "PASS: homed to absolute angle $STATUS_ANGLE (error=$distance counts)"
+            return 0
+        fi
+
+        if (( distance > 512 )); then distance=512; fi
+        if (( angle_delta * HOME_FORWARD_SIGN > 0 )); then
+            direction="FORWARD"
+            expected_sign="$HOME_FORWARD_SIGN"
+        else
+            direction="REVERSE"
+            expected_sign="$((-HOME_FORWARD_SIGN))"
+        fi
+        echo "HOMING angle=$STATUS_ANGLE delta=$angle_delta step=$distance direction=$direction"
+        run_position_move "$direction" "$distance" "$expected_sign" || return 1
+        read_status || return 1
+    done
 }
 
 pulse_valve() {
@@ -303,35 +349,15 @@ trap cleanup EXIT
 
 echo "UNO USB: $master_usb"
 echo "Node sketch: $NODE_SKETCH"
-echo "Cycle: 9 unique encoder-spaced stations forward, then reverse through those stations to point 0."
+echo "Cycle: home to absolute angle 0, visit 9 stations, then return to absolute point 0."
 echo "The node samples the AS5600 locally; Termux status lines are supervisory."
-echo "Valve pulse: ${VALVE_PULSE_MS} ms at each station; valve remains OFF during return."
+echo "Valve pulse: ${VALVE_PULSE_MS} ms at every forward and reverse station."
 echo "Keep the physical actuator-supply cutoff within reach."
 
 if [[ ! -f "$NODE_SKETCH" ]]; then
     echo "Missing L298N node sketch: $NODE_SKETCH" >&2
     exit 1
 fi
-if [[ ! -t 0 ]]; then
-    echo "The actuator test requires an interactive terminal and operator confirmations." >&2
-    exit 2
-fi
-read -r -p "Confirm IN1-IN4 each have 10 kOhm pulldowns, and the 22 V/5 V L298N supply configuration is correct. Type ACTUATE: " confirmation
-if [[ "$confirmation" != "ACTUATE" ]]; then
-    echo "Test cancelled before flashing or actuator commands."
-    exit 2
-fi
-read -r -p "Confirm the motor shaft is free and the physical cutoff is reachable. Type READY: " ready
-if [[ "$ready" != "READY" ]]; then
-    echo "Test cancelled before flashing or actuator commands."
-    exit 2
-fi
-read -r -p "Confirm the earlier 500 ms valve pulse physically actuated and released. Type VALVE: " valve_ready
-if [[ "$valve_ready" != "VALVE" ]]; then
-    echo "Test cancelled before flashing or actuator commands."
-    exit 2
-fi
-
 discover_single_node
 node_available=1
 if [[ "$skip_flash" -eq 0 ]]; then
@@ -349,38 +375,42 @@ if [[ "$STATUS_MOTOR" != "OFF" || "$STATUS_VALVE" != "OFF" ||
     exit 1
 fi
 run_bus "NODE 1 STOPPED VALVE OFF MOTOR OFF" STOP 1
-run_bus "NODE 1 ENCODER 0" RESET_ENCODER 1
+echo "Homing shaft to absolute AS5600 angle 0 (tolerance ${HOME_TOLERANCE_COUNTS} counts)."
+home_to_absolute_zero
+point_zero_count="$STATUS_ENCODER"
 
-echo "Starting nine-point forward sweep from the current shaft angle (point 0)."
+echo "Starting nine-point forward sweep from absolute angle 0 (encoder count=$point_zero_count)."
 pulse_valve
 target=$(((4096 + 4) / 9))
-echo "POINT 1/9 target=$target"
+echo "POINT 1/9 offset=$target"
 run_position_move FORWARD "$target" 0
 forward_delta="$MOVE_RESULT_DELTA"
 forward_sign=1
 if (( forward_delta < 0 )); then forward_sign=-1; fi
 read_status || exit 1
-error=$((forward_sign * target - STATUS_ENCODER))
+target=$((point_zero_count + forward_sign * target))
+error=$((target - STATUS_ENCODER))
 if (( error < 0 )); then error=$((-error)); fi
 if (( error > POSITION_TOLERANCE_COUNTS )); then
-    echo "FAIL: stopped $error counts from station 1 target=$((forward_sign * target))." >&2
+    echo "FAIL: stopped $error counts from station 1 target=$target." >&2
     exit 1
 fi
-echo "PASS: station 1/9 target=$((forward_sign * target)) actual=$STATUS_ENCODER error=$error angle=$STATUS_ANGLE"
+echo "PASS: station 1/9 target=$target actual=$STATUS_ENCODER error=$error angle=$STATUS_ANGLE"
 pulse_valve
 
 for ((point = 2; point <= 8; point++)); do
-    target=$((forward_sign * ((point * 4096 + 4) / 9)))
+    target=$((point_zero_count + forward_sign * ((point * 4096 + 4) / 9)))
     echo "POINT $point/9 target=$target"
     move_to_encoder_target "$target" "$forward_sign"
     pulse_valve
 done
 
-echo "Returning through the stations in reverse; valve remains OFF."
+echo "Returning through the stations in reverse; pulsing the valve at each stopped station."
 for ((point = 7; point >= 0; point--)); do
-    target=$((forward_sign * ((point * 4096 + 4) / 9)))
+    target=$((point_zero_count + forward_sign * ((point * 4096 + 4) / 9)))
     echo "RETURN POINT $point/9 target=$target"
     move_to_encoder_target "$target" "$forward_sign"
+    pulse_valve
 done
 
 read_status
@@ -391,4 +421,4 @@ if [[ "$STATUS_MOTOR" != "OFF" || "$STATUS_VALVE" != "OFF" ||
 fi
 run_bus "NODE 1 STOPPED VALVE OFF MOTOR OFF" STOP 1
 node_available=0
-echo "CYCLE_COMPLETE: 9 unique stations, forward sweep, reverse return to point 0, 9 valve pulses; outputs OFF."
+echo "CYCLE_COMPLETE: homed to absolute angle 0, visited 9 stations, returned to point 0, 17 valve pulses; outputs OFF."
