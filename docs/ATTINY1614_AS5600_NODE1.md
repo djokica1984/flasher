@@ -72,8 +72,9 @@ chmod 700 ~/read_as5600_node1.sh
 ~/read_as5600_node1.sh --flash /dev/bus/usb/001/003
 ```
 
-It prints one line per reading to standard output: timestamp, raw angle
-(`0..4095`), and degrees (`raw * 360 / 4096`). The default delay is 0.5 seconds
-between requests; use `--interval 0.2` to change it. With `--flash`, it
-rediscovers the bus and restores COMM mode before streaming. Press Ctrl+C to
-stop.
+It prints one line per attempt to standard output: timestamp, raw angle
+(`0..4095`), and degrees (`raw * 360 / 4096`). If the sensor is unavailable
+(`ANGLE -1`) or a request fails, it prints a timestamped `ERROR` status and
+keeps retrying instead of exiting. The default delay is 0.5 seconds between
+requests; use `--interval 0.2` to change it. With `--flash`, it rediscovers
+the bus and restores COMM mode before streaming. Press Ctrl+C to stop.

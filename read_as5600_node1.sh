@@ -150,23 +150,31 @@ echo "Streaming Node 1 angle readings from $master_usb; press Ctrl+C to stop." >
 echo "Output: timestamp raw-counts degrees" >&2
 
 while true; do
+    timestamp="$(date '+%Y-%m-%dT%H:%M:%S%z')"
     if ! response="$(andruino-flash bus --usb-device "$master_usb" ANGLE 1 2>&1)"; then
-        echo "ANGLE request failed:" >&2
+        printf '%s ERROR ANGLE_REQUEST_FAILED\n' "$timestamp"
+        echo "ANGLE request failed; retrying:" >&2
         echo "$response" >&2
-        exit 1
+        sleep "$interval_seconds"
+        continue
     fi
-    angle="$(grep -Eo 'NODE 1 ANGLE -?[0-9]+' <<<"$response" | tail -n 1 | awk '{print $4}')"
-    if [[ "$angle" == "-1" ]]; then
-        echo "AS5600 returned ANGLE -1; check sensor power, I2C wiring, and pull-ups." >&2
+    if [[ "$response" =~ NODE[[:space:]]1[[:space:]]ANGLE[[:space:]](-?[0-9]+) ]]; then
+        angle="${BASH_REMATCH[1]}"
+        if [[ "$angle" == "-1" ]]; then
+            printf '%s ERROR SENSOR_UNAVAILABLE\n' "$timestamp"
+            echo "AS5600 returned ANGLE -1; check sensor power, I2C wiring, and pull-ups." >&2
+        elif (( angle >= 0 && angle <= 4095 )); then
+            degrees="$(awk -v raw="$angle" 'BEGIN { printf "%.2f", raw * 360 / 4096 }')"
+            printf '%s %s %s\n' "$timestamp" "$angle" "$degrees"
+        else
+            printf '%s ERROR INVALID_ANGLE\n' "$timestamp"
+            echo "Invalid AS5600 angle response; expected 0..4095:" >&2
+            echo "$response" >&2
+        fi
+    else
+        printf '%s ERROR INVALID_RESPONSE\n' "$timestamp"
+        echo "Could not parse Node 1 angle response; retrying:" >&2
         echo "$response" >&2
-        exit 1
     fi
-    if [[ ! "$angle" =~ ^[0-9]+$ ]] || (( angle > 4095 )); then
-        echo "Invalid AS5600 angle response; expected 0..4095:" >&2
-        echo "$response" >&2
-        exit 1
-    fi
-    degrees="$(awk -v raw="$angle" 'BEGIN { printf "%.2f", raw * 360 / 4096 }')"
-    printf '%s %s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$angle" "$degrees"
     sleep "$interval_seconds"
 done
