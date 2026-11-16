@@ -233,7 +233,7 @@ name. For example:
 
 ```text
 /storage/emulated/0/Download/andruino/uno/Blink300/Blink300.ino
-/storage/emulated/0/Download/andruino/uno/jtag2updi/jtag2updi.ino
+/storage/emulated/0/Download/andruino/uno/uno-jtag2updi-strict/uno-jtag2updi-strict.ino
 /storage/emulated/0/Download/andruino/attiny1614/Blink3000/Blink3000.ino
 ```
 
@@ -321,11 +321,15 @@ app opens. These are deliberately independent:
 andruino-flash flash-sketch --platform uno --usb-device "$UNO_USB" \
   "$ROOT/uno/Blink300/Blink300.ino"
 
-# Put JTAG2UPDI on the Uno, then flash the ATtiny wired to that Uno.
-andruino-flash flash-sketch --platform uno --usb-device "$UNO_USB" \
-  "$ROOT/uno/jtag2updi/jtag2updi.ino"
+# Build and flash the exact strict-source JTAG2UPDI master to the Uno.
+MASTER_HEX=/storage/emulated/0/Download/uno-jtag2updi-strict-source-build.hex
+proot-distro login ubuntu -- bash \
+  "$ROOT/uno/uno-jtag2updi-strict/build-strict-master.sh" \
+  "$ROOT/uno/uno-jtag2updi-strict" "$MASTER_HEX"
+echo "19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d  $MASTER_HEX" | sha256sum -c -
+andruino-flash flash-platform --usb-device "$UNO_USB" uno "$MASTER_HEX"
 andruino-flash flash-sketch --platform attiny1614 --node 1 --usb-device "$UNO_USB" \
-  "$ROOT/attiny1614/Blink300/Blink300.ino"
+  "$ROOT/attiny1614/BlinkNode1/BlinkNode1.ino"
 ```
 
 ### Nano and the ATtiny connected to it
@@ -345,8 +349,9 @@ andruino-flash flash-sketch --platform attiny1614 --node 1 --usb-device "$NANO_U
 ```
 
 **Important:** flashing a Blink sketch onto an Uno or Nano replaces the
-JTAG2UPDI firmware. Flash that board's `jtag2updi.ino` again before using it
-to program its ATtiny.
+JTAG2UPDI firmware. For this verified system, restore the Uno using the
+strict-source builder and hash-checked HEX above; do not substitute a
+`flash-sketch` build of `jtag2updi.ino`.
 
 `flash-sketch` compiles the given source and flashes the resulting HEX beside
 it. For example, a sketch can be outside the named platform folders as long as
@@ -425,12 +430,16 @@ requests to the master's USB serial adapter at 19200 baud. Because JTAG2UPDI
 provides its own `main()` instead of Arduino's normal core startup, the master
 initializes the Arduino millisecond timer and enables interrupts only while
 processing a bus command. This supports SoftwareSerial reception without
-leaving periodic interrupts enabled during UPDI programming. Build and install
-the modified Uno programmer and all seven nodes:
+leaving periodic interrupts enabled during UPDI programming. Build and install the verified strict-source Uno programmer and all seven
+nodes:
 
 ```sh
-andruino-flash flash-sketch --platform uno --usb-device "$UNO_USB" \
-  "$ROOT/uno/jtag2updi/jtag2updi.ino"
+MASTER_HEX=/storage/emulated/0/Download/uno-jtag2updi-strict-source-build.hex
+proot-distro login ubuntu -- bash \
+  "$ROOT/uno/uno-jtag2updi-strict/build-strict-master.sh" \
+  "$ROOT/uno/uno-jtag2updi-strict" "$MASTER_HEX"
+echo "19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d  $MASTER_HEX" | sha256sum -c -
+andruino-flash flash-platform --usb-device "$UNO_USB" uno "$MASTER_HEX"
 andruino-flash flash-sketch --platform attiny1614 --usb-device "$UNO_USB" \
   "$ROOT/attiny1614/BlinkNode1/BlinkNode1.ino"
 andruino-flash flash-sketch --platform attiny1614 --usb-device "$UNO_USB" \
@@ -576,7 +585,9 @@ to D5/D6 while it reflashes the Uno and ATtiny. Keep exactly one target
 connected. The script accepts either no responding node (for a blank first-time
 target) or node 1 after the master is reflashed; it refuses to proceed if any
 other node address is discovered. The ATtiny flashing step uses `--node 1`.
-The script ends in COMM mode with the LED off and the node's UPDI gate disabled.
+The script ends in COMM mode with the LED off and the node's logical UPDI
+selection state disabled. This is not electrical isolation; the tested setup
+has a direct D6-to-PA0 connection.
 
 The default test builds and reflashes the strict-source master, then flashes
 node 1 and runs all communication checks. If the strict-source master has just
@@ -601,13 +612,14 @@ hardware and returns placeholder encoder/angle values; a passing test does not
 verify an AS5600, motor, valve, or their wiring. Keep load power disconnected
 unless separately testing properly wired, current-limited hardware.
 
-There is a wiring-document mismatch to resolve before connecting an UPDI gate:
-[`ATTINY1614_NODE1_WIRING.md`](ATTINY1614_NODE1_WIRING.md) and the current node
-library use physical pin 9/PB0 for the gate, while
-[`FRESH_UPDI_CONTROL_BUS.md`](FRESH_UPDI_CONTROL_BUS.md) describes a different
-Uno D4/PB1 arrangement. Do not combine those circuits. The script targets the
-current `BlinkNode1`/`AndruinoBusNode` firmware; verify the transistor wiring
-and target's UPDI path against the actual hardware before flashing.
+Older wiring notes describe unverified PMOS gate alternatives and disagree
+about the gate pin. They are not part of this test setup. The validated
+single-node wiring uses Uno D6 directly to PA0/UPDI, with D5 for the control
+bus. `UPDI ENABLE`/`DISABLE` and node selection are protocol/software states,
+not electrical isolation. See
+[`ATTINY1614_NODE1_WIRING.md`](ATTINY1614_NODE1_WIRING.md) and
+[`FRESH_UPDI_CONTROL_BUS.md`](FRESH_UPDI_CONTROL_BUS.md) for their explicit
+legacy/unverified labels.
 
 ### Full seven-node communication and reflash test
 

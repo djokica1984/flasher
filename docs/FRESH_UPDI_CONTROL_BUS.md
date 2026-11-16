@@ -1,5 +1,12 @@
 # Fresh ATtiny1614 UPDI and control-bus design
 
+> **Unverified historical proposal:** this document describes an alternate
+> two-node D4/PMOS gate design. It is not the wiring or firmware baseline
+> validated by the single-node Uno test. The verified baseline uses the strict
+> Uno master, one Node 1, D5 for the control bus, and a direct D6-to-PA0/UPDI
+> connection. Follow [REPRODUCING.md](REPRODUCING.md) and
+> [VERIFIED_BASELINE.md](VERIFIED_BASELINE.md) for current instructions.
+
 ## Purpose
 
 This design removes three sources of ambiguity:
@@ -8,7 +15,9 @@ This design removes three sources of ambiguity:
 2. The Uno and both ATtiny node sketches share one explicitly defined serial pin route.
 3. The Android app restores the UPDI isolation gate to the safe disabled state after every flash attempt.
 
-This repository is intentionally using the two-node protocol only: node addresses 1 and 2.
+The examples in this proposal cover node addresses 1 and 2 only; they do not
+describe the current seven-address firmware protocol or the tested single-node
+physical wiring.
 
 ## Required wiring
 

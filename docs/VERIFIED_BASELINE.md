@@ -1,15 +1,20 @@
 # Verified build and hardware baseline
 
-Last recorded: 2026-11-13. This is the reproducibility record for the
-seven-node ATtiny1614 system. It records both the successful exact-image Nano
-test and the failed Nano-profile rebuild; those are different firmware images.
+Last recorded: 2026-11-16. This is the reproducibility record for the
+Uno/Nano ATtiny1614 system. It records the successful single-node Uno test and
+the earlier seven-node Uno/Nano tests. It also distinguishes the exact-image
+Nano test from the failed Nano-profile rebuild; those are different firmware
+images.
 
 ## Canonical sources
 
-- The Uno master source is
-  [`andruino/uno/jtag2updi/`](../andruino/uno/jtag2updi/). Do not compile or
-  flash `jtag2updi.ino` for Nano. Nano must use the exact strict HEX below,
-  uploaded with `arduino:avr:nano:cpu=atmega328old` (old bootloader, 57,600 baud).
+- The verified master is the strict-source image below. Its complete
+  reproducible package is
+  [`andruino/uno/uno-jtag2updi-strict/`](../andruino/uno/uno-jtag2updi-strict/);
+  use its custom hash-checking builder for an Uno. Do not use
+  `flash-sketch` on `andruino/uno/jtag2updi/jtag2updi.ino` as a substitute.
+  Nano must use the exact strict HEX below, uploaded with
+  `arduino:avr:nano:cpu=atmega328old` (old bootloader, 57,600 baud).
   Do not treat `andruino/nano/jtag2updi/` as a Nano source of truth.
 - The exact image that passed the latest Nano test is
   `releases/uno-jtag2updi/uno-jtag2updi-strict.hex`, SHA-256
@@ -34,8 +39,8 @@ The complete source snapshot that reproduces the strict master HEX is saved at
 and copied into board-specific packages at
 [`andruino/uno/uno-jtag2updi-strict/`](../andruino/uno/uno-jtag2updi-strict/)
 and [`andruino/nano/nano-jtag2updi-strict/`](../andruino/nano/nano-jtag2updi-strict/).
-It matches the `andruino/uno/jtag2updi/` source at Git commit
-`7f03242c41dd08c5216a8ef515b590b8dcf54cbe`. Rebuilding this snapshot with
+The strict package—not the ordinary Arduino CLI build—reproduces the
+known-good master image. Rebuilding this snapshot with
 [`tools/build-uno-firmware.ps1`](../tools/build-uno-firmware.ps1), Arduino AVR
 Boards core `1.8.8`, and AVR-GCC
 `7.3.0-atmel3.6.1-arduino7` produced SHA-256
@@ -104,6 +109,7 @@ reproduce the strict HEX.
 |---|---|---|
 | Termux CLI | `tools/andruino-flash` / `~/bin/andruino-flash` | `2110a6603d3e902358950795f9d4132b23e11bc6ecc6c27bb4c37850943cd28f` |
 | Seven-node test driver | `comprehensive_test.sh` / `~/comprehensive_test_nano.sh` | `ecb89411497f106ffd1e2f1cd804a6f9f0787e5551dc716cd7342243427005d8` |
+| Single-node Uno test driver | `comprehensive_test_uno_node1.sh` / `~/comprehensive_test_uno_node1.sh` | `b0dc67e946a0f18d752a8379edaef1310ce74ce19d55229f9a8a930d45b32104` |
 | Installed debug APK | `releases/andruino-flash-debug.apk` | `7bd784f6f33aab5d48d1afab35f006c75c6347bbb658f62c2ae89c5fa97a1a5f` |
 | Known-good Uno-tested master HEX | `releases/uno-jtag2updi/uno-jtag2updi-strict.hex` | `19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d` |
 | Nano-profile rebuild HEX (flash verified; bus failed) | `releases/nano-jtag2updi/jtag2updi-nano-old-bootloader.hex` | `8cd615fdae4d2e67c2ce5bc51669fda72df3b801a759ead9262d0223ba23b940` |
@@ -135,6 +141,37 @@ Termux copy matched this hash before the Nano run.
 The Uno test verifies software protocol and stored command state only. It does
 not measure physical valve/motor movement, sensor readings, or electrical
 isolation of UPDI.
+
+### Uno master with one ATtiny1614 Node 1 — passed
+
+On 2026-11-16, `comprehensive_test_uno_node1.sh` rebuilt the strict-source Uno
+master to the expected SHA-256
+`19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d`, flashed
+it, and AVRDUDE verified all 15,216 bytes. It then discovered only Node 1,
+flashed `BlinkNode1.ino`, and verified all 6,140 flash bytes. The script's
+protocol/state checks passed, ending with:
+
+```text
+PASS: UNO master and single ATtiny1614 node 1 checks passed.
+```
+
+The test intentionally left the single Node 1 connected to the D5/D6 bus while
+flashing the master. USB paths in the transcript are transient; use
+`andruino-flash devices` to find the current path. If an old/incompatible node
+responds with `ERR NODE USES 1 THROUGH 7` and prevents discovery, the verified
+recovery was to flash `BlinkNode1.ino` directly with `flash-sketch` (without
+`--node`) and then rerun the comprehensive script.
+
+This is a firmware protocol/state test, not a physical sensor or actuator
+test. `READ_ENCODER` returned `-999999` and `ANGLE` returned `-1`, the
+`BlinkNode1` placeholder values. Valve and motor responses reflect logical
+state only; no physical valve/motor movement, AS5600 readings, or UPDI
+electrical isolation was validated by this run.
+
+The separately checked-in AS5600 and L298N Node 1 sketches are extensions, not
+part of this passing baseline. Their source/build and test scripts are
+preserved for reproduction, but neither was physically validated as of this
+record.
 
 ### Nano master — passed with exact Uno-tested image
 

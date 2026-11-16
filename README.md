@@ -113,11 +113,15 @@ andruino-flash flash-sketch --platform uno --usb-device "$UNO_USB" \
 andruino-flash flash-sketch --platform nano --usb-device "$NANO_USB" \
   "$ROOT/nano/Blink1000/Blink1000.ino"
 
-# Uno's ATtiny: flash programmer to Uno, then flash target through Uno.
-andruino-flash flash-sketch --platform uno --usb-device "$UNO_USB" \
-  "$ROOT/uno/jtag2updi/jtag2updi.ino"
-andruino-flash flash-sketch --platform attiny1614 --usb-device "$UNO_USB" \
-  "$ROOT/attiny1614/Blink1000/Blink1000.ino"
+# Uno master and its ATtiny: build and flash the verified strict master image.
+MASTER_HEX=/storage/emulated/0/Download/uno-jtag2updi-strict-source-build.hex
+proot-distro login ubuntu -- bash \
+  "$ROOT/uno/uno-jtag2updi-strict/build-strict-master.sh" \
+  "$ROOT/uno/uno-jtag2updi-strict" "$MASTER_HEX"
+echo "19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d  $MASTER_HEX" | sha256sum -c -
+andruino-flash flash-platform --usb-device "$UNO_USB" uno "$MASTER_HEX"
+andruino-flash flash-sketch --platform attiny1614 --node 1 --usb-device "$UNO_USB" \
+  "$ROOT/attiny1614/BlinkNode1/BlinkNode1.ino"
 
 # Nano master: use the exact Uno-tested image with the Nano upload profile.
 andruino-flash flash-platform --usb-device "$NANO_USB" nano "$MASTER_HEX"
@@ -129,8 +133,7 @@ andruino-flash flash-platform --usb-device "$UNO_USB" uno \
   "$ROOT/uno/Blink1000/Blink1000.ino.hex"
 andruino-flash flash-platform --usb-device "$NANO_USB" nano \
   "$ROOT/nano/Blink1000/Blink1000.ino.hex"
-andruino-flash flash-platform --usb-device "$UNO_USB" uno \
-  "$ROOT/uno/jtag2updi/jtag2updi.ino.hex"
+andruino-flash flash-platform --usb-device "$UNO_USB" uno "$MASTER_HEX"
 andruino-flash flash-platform --usb-device "$UNO_USB" attiny1614 \
   "$ROOT/attiny1614/Blink1000/Blink1000.ino.hex"
 andruino-flash flash-platform --usb-device "$NANO_USB" nano "$MASTER_HEX"
@@ -140,10 +143,15 @@ andruino-flash flash-platform --usb-device "$NANO_USB" attiny1614 \
 
 ### Uno/Nano control bus
 
-The verified JTAG2UPDI master firmware supports up to seven addressed ATtiny1614
-nodes on the same D5 half-duplex bus. Build the source for Uno; for Nano, do
-not build `jtag2updi.ino`—use the exact strict HEX. The full test passes on Uno
-and on Nano when that image is uploaded using Nano's old-bootloader profile.
+The verified strict-source JTAG2UPDI master firmware supports up to seven
+addressed ATtiny1614 nodes on the same D5 half-duplex bus. Use the complete
+`andruino/uno/uno-jtag2updi-strict` source package and its hash-checked builder
+for an Uno. For a Nano, use the exact strict HEX with Nano's old-bootloader
+profile. Do not use `flash-sketch` on `andruino/uno/jtag2updi/jtag2updi.ino`
+for this system: that CLI build is not the verified strict master image.
+A single-node Uno test is documented in
+[docs/REPRODUCING.md](docs/REPRODUCING.md); exact outcomes are in
+[docs/VERIFIED_BASELINE.md](docs/VERIFIED_BASELINE.md).
 A separate Nano-profile rebuild was flash-verified but did not communicate;
 the known-good HEX and results are in the
 [verified baseline](docs/VERIFIED_BASELINE.md). The Android app uses the USB

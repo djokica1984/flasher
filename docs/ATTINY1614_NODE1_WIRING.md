@@ -1,7 +1,14 @@
 # ATtiny1614 Node 1 wiring
 
-This description applies to one complete node with valve, bidirectional motor,
-AS5600 magnetic encoder, UPDI isolation, and the Uno control bus.
+> **Legacy/alternate design:** the DRV8871, valve MOSFET, and PMOS UPDI-gate
+> wiring below is not the physical setup validated by the single-node Uno
+> test. That baseline used a direct Uno D6-to-PA0/UPDI connection and D5 for
+> the control bus. Use [REPRODUCING.md](REPRODUCING.md) for the verified
+> baseline and [ATTINY1614_L298N_NODE1.md](ATTINY1614_L298N_NODE1.md) for the
+> separate, not-yet-validated L298N proposal.
+
+This document describes an alternate node design with a valve, bidirectional
+motor, AS5600 magnetic encoder, and optional UPDI isolation.
 
 ## Package reference
 
@@ -31,7 +38,7 @@ Viewed from above with the notch toward you:
   the actual load. Connect its positive supply only to the load/MOSFET or H-
   bridge side of the design.
 
-## UPDI isolation
+## Alternate PMOS UPDI isolation (not used by the verified baseline)
 
 - Uno D6 to AO3401 source.
 - AO3401 drain to ATtiny physical pin 10/PA0/UPDI.
@@ -39,10 +46,12 @@ Viewed from above with the notch toward you:
 - Put approximately 100 kOhm from physical pin 9/PB0 to GND.
 - PB0 LOW enables UPDI; PB0 HIGH disables UPDI.
 
-The source/drain arrangement must allow an enabled PMOS path in either physical
-orientation. Confirm the actual component package pinout (Gate, Source, Drain)
-and continuity with a meter with power removed. Do not assume D6 and UPDI are
-interchangeable through the transistor.
+This is a proposed circuit only. Its electrical behavior and pin mapping have
+not been validated. Confirm the actual component package pinout (Gate, Source,
+Drain) and continuity with a meter with power removed before using it. The
+verified one-node setup instead connects Uno D6 directly to PA0/UPDI; the
+firmware's PB0 selection state does not prove that UPDI is electrically
+isolated.
 
 ## Uno control bus
 

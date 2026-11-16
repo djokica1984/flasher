@@ -1,8 +1,15 @@
 # Andruino complete system regeneration guide
 
-This document describes the complete tested architecture and the source layout needed to recreate the Uno/Nano JTAG2UPDI control-bus system and the ATtiny1614 sketches from scratch.
+This document describes the Uno/Nano JTAG2UPDI control-bus architecture and the
+ATtiny1614 sketches.
 
-> Verified state: Nodes 1 through 7 use the same address library and were rebuilt with the seven-node control-bus implementation. All seven nodes returned `PONG` in the final all-node verification. Reproduce the system from this source before diagnosing a no-response node.
+> **Current reproduction path:** use [REPRODUCING.md](REPRODUCING.md) and
+> [VERIFIED_BASELINE.md](VERIFIED_BASELINE.md). The single-node Uno test passed
+> on 2026-11-16. The verified master is the strict-source image built from
+> `andruino/uno/uno-jtag2updi-strict`; the ordinary Arduino CLI build of
+> `andruino/uno/jtag2updi/jtag2updi.ino` is not interchangeable with it.
+> The seven-node results below are historical and do not validate physical
+> actuators, sensors, or UPDI isolation.
 
 ## 1. System components
 
@@ -31,8 +38,10 @@ The system has three independent communication layers:
 ```text
 andruino/
   uno/
+    uno-jtag2updi-strict/
+      uno-jtag2updi-strict.ino  Verified strict-source build package
     jtag2updi/
-      jtag2updi.cpp             Canonical Uno/Nano JTAG2UPDI main loop
+      jtag2updi.ino              Other/legacy Arduino CLI build; not verified master
       control_bus.cpp            D5 node control protocol
       control_bus.h
       JTAG2.cpp                  Modified to recognize control-bus commands
@@ -73,9 +82,10 @@ tools/andruino-flash              Termux build and service wrapper
 docs/REPRODUCING.md               Installation and flashing procedure
 ```
 
-`andruino-flash` compiles the canonical `uno/jtag2updi` source with the
-requested Uno or Nano profile; the Nano folder path is retained as a
-compatibility alias.
+The strict-source master requires its custom builder and SHA-256 check; do not
+build it with the generic `andruino-flash flash-sketch` path. See
+`REPRODUCING.md` for the Uno build/flash steps and the exact Nano upload
+profile.
 
 ## 2. Programming and control hardware
 
@@ -101,7 +111,10 @@ Master 5V  -> ATtiny VDD, physical pin 1
 Master GND -> ATtiny GND, physical pin 14
 ```
 
-Connect only one ATtiny UPDI target at a time. Disconnect master D5 and D6 before flashing the master itself.
+Connect only one ATtiny UPDI target at a time. The verified single-node
+procedure keeps Node 1 connected during master flashing; use that documented
+script rather than treating `MODE`, `SELECT`, or `UPDI` responses as proof of
+electrical isolation.
 
 ### Shared node control bus
 
@@ -117,9 +130,11 @@ Repeat the two 1 kOhm bus branches for each additional node. All nodes share mas
 
 ## 3. Shared Uno/Nano JTAG2UPDI firmware
 
-Use the repository's complete `andruino/uno/jtag2updi` directory as the
-canonical source for either master. Do not replace it with an unmodified
-upstream copy because this source contains the `control_bus` integration.
+Use `andruino/uno/uno-jtag2updi-strict` as the build source for the verified
+Uno master and use the exact resulting HEX for Nano. The separate
+`andruino/uno/jtag2updi` Arduino CLI build is not the verified strict image.
+The strict package includes the control-bus integration and is built with its
+custom script, which checks the expected master HEX hash.
 
 ### Required control-bus integration
 
@@ -342,17 +357,18 @@ andruino-flash build --platform attiny1614 /storage/emulated/0/Download/andruino
 
 ## 7. Master flashing and validity requirement
 
-First disconnect D5/D6 and all node wiring. Choose the connected master and
-flash the canonical sketch with its matching profile:
+Build and flash the strict-source master image. For the one-node Uno baseline,
+the comprehensive script performs this build, checks its SHA-256, flashes the
+master, and verifies read-back:
 
 ```sh
-MASTER_PLATFORM=nano # use uno for an Uno
-MASTER_USB=/dev/bus/usb/001/009
-andruino-flash flash-sketch \
-  --platform "$MASTER_PLATFORM" \
-  --usb-device "$MASTER_USB" \
-  /storage/emulated/0/Download/andruino/uno/jtag2updi/jtag2updi.ino
+./comprehensive_test_uno_node1.sh
 ```
+
+For manual flashing, build the strict source package, verify the expected
+SHA-256 `19889521fed85125927b623edbc3c55cfa6fcca74e4fa6aed625c4088e9a9c5d`,
+then pass the resulting `.hex` to `flash-platform` with the correct board
+profile. Never pass the `.ino` file to `flash-platform`.
 
 A valid master result must include all of the following:
 
@@ -366,7 +382,9 @@ RESULT success
 
 A config-file warning from AVRDUDE is not enough by itself to declare success. Writing and reading must reach 100% and the completion line must be present.
 
-Reconnect the D5 control bus only after master flashing is complete. Connect D6 to the target UPDI only for direct target flashing; disconnect it for normal D5 bus operation.
+The verified single-node script leaves Node 1 connected to D5/D6 during master
+flashing. D6 is the direct UPDI line to PA0; the normal communication checks
+use D5.
 
 ## 8. Direct ATtiny flashing
 
@@ -379,11 +397,16 @@ andruino-flash flash-sketch \
   /storage/emulated/0/Download/andruino/attiny1614/BlinkNode1/BlinkNode1.ino
 ```
 
-Change the final path to `BlinkNode2` through `BlinkNode7` for each corresponding physical node. For manual seven-node flashing, enable only that node's UPDI gate, disconnect the shared UPDI wire electrically or isolate the other gates, and flash exactly one node at a time:
+Change the final path to `BlinkNode2` through `BlinkNode7` for each
+corresponding physical node. For manual multi-node flashing, connect D6 to only
+the selected target's UPDI and physically disconnect/isolate all other target
+UPDI pins. The `UPDI ENABLE`/`DISABLE` protocol commands do not operate or
+verify an electrical gate. The optional gate designs in older wiring notes are
+unverified; do not rely on them without measuring isolation.
 
 ```sh
 for n in 1 2 3 4 5 6 7; do
-  echo "Connect only node $n UPDI/isolation gate and press Enter"
+  echo "Connect D6 to only node $n UPDI and press Enter"
   read
   andruino-flash flash-sketch --platform attiny1614 --usb-device "$UNO_USB" \
     "/storage/emulated/0/Download/andruino/attiny1614/BlinkNode$n/BlinkNode$n.ino"
@@ -392,10 +415,18 @@ done
 
 Before automated gate-controlled flashing can be trusted, test `UPDI ENABLE n` and `UPDI DISABLE n` for every node independently and verify with a multimeter or AVRDUDE that non-selected gates are electrically isolated.
 
-## 9. Recreate and test from scratch
+## 9. Manual multi-node bring-up
 
-1. Flash the Uno/JTAG2UPDI image with D5/D6 disconnected.
-2. Reconnect only the Node 1 D5 control branch, PB2/PB3, power, and ground.
+For the exact, verified single-node Uno setup, use the
+`comprehensive_test_uno_node1.sh` procedure in `REPRODUCING.md`; it
+rebuilds/flashes the strict master and keeps the single node connected. The
+manual steps below are for expanding or diagnosing a multi-node bus and were
+not part of that single-node test.
+
+1. Flash the strict-source Uno master using the checked builder and HEX
+   procedure in section 7; do not flash the generic `jtag2updi.ino` build.
+2. Connect only Node 1's D5 control-bus branches, power, and ground. For direct
+   target programming, connect D6 to only the selected node's PA0/UPDI.
 3. Reset/power-cycle Node 1.
 4. Run:
 
